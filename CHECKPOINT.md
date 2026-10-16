@@ -1,6 +1,6 @@
 # CHECKPOINT.md
 
-Last updated: 2026-10-16
+Last updated: 2026-10-17 (session 3)
 
 ## Status: Pre-production — Design phase complete
 
@@ -49,13 +49,33 @@ Last updated: 2026-10-16
 - [x] Slot Liga & Bankruptcy doc — `SLOT-LIGA-BANKRUPTCY.md` (slot market, bankruptcy sequence, loan shark, agent bankruptcy)
 - [ ] Dynamic PA Formula doc — detailed delta formula (outlined in GAME-ENGINE.md §3, needs validation)
 
-### Implementation (nothing started yet)
+### Implementation
 
-- [ ] Tech stack decision (JS framework, state management)
-- [ ] Database schema (SQLite / IndexedDB)
-- [ ] World generation (player pool, club setup, league structure)
-- [ ] Match engine implementation
-- [ ] Phase 1 MVP: Player mode, single league, basic career loop
+- [x] Tech stack: Svelte 5 + TypeScript + Vite + sql.js + Web Worker
+- [x] Project scaffold — `game/` directory, Vite WASM config, build passes clean
+- [x] Type definitions — `src/types/index.ts` (Player, Club, League, Match, Event, WorldState)
+- [x] DB schema — `src/engine/db.ts` (all core tables via sql.js SQLite)
+- [x] Match engine — `src/engine/match.ts` (Full Sim, Poisson xG, goal attribution)
+- [x] PA/CA engine — `src/engine/pa.ts` (per-season recalc, age multipliers, trait modifiers)
+- [x] World state — `src/engine/world.ts` (day/season tick, legacy score, career phase)
+- [x] Web Worker — `src/engine/worker.ts` (message bus, engine runs off main thread)
+- [x] App shell — `src/App.svelte` (worker init, new game, world state display)
+- [x] World generation — `src/engine/worldgen.ts` (18 klub Liga 1 + ~430 pemain prosedural, seeded LCG)
+- [x] Static data Indonesia — `src/data/indonesia.ts` (klub, nama, posisi distribusi)
+- [x] Phase 1 MVP shell — title screen → new game → career loop (advance day/week/month)
+- [x] Fixture generation — double round-robin circle method, day-based scheduling (`worldgen.ts`)
+- [x] Scheduler — `nextEventDay`, `processMatchDay`, `getUpcoming`, `getSquad` (`scheduler.ts`)
+- [x] Worker — `ADVANCE_TO_NEXT_EVENT` + `GET_UPCOMING` messages
+- [x] Career loop UI — event-driven advance ("Lanjut ke Pekan N"), shows result + next match
+- [x] Competition config system — `StageConfig[]`, `ForeignRuleSet`, `CardRules`, `AwardDefinition` di `types/index.ts`
+- [x] DB schema — `competition_configs`, `card_accumulation`, `format_proposals`, `format_votes`; update `match_results` (stage_id, group_num), `leagues` (active_config_id), `player_stats` (competition_id)
+- [x] Default Liga 1 config di-insert ke DB saat worldgen (`insertLiga1Config`)
+- [ ] Event system implementation
+- [ ] League table + standings UI
+- [ ] Tonton Match (step-by-step wheel display)
+- [ ] Card accumulation logic (query card_accumulation, apply suspension)
+- [ ] Multi-stage fixture generation (baca StageConfig, handle group_count > 1)
+- [ ] Format proposal + voting mechanic
 
 ---
 

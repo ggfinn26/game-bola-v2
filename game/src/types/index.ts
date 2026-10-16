@@ -279,3 +279,205 @@ export interface WorldState {
   season: number;
   ego: EgoState;
 }
+
+// ─── Competition Config ───────────────────────────────────────────────────────
+
+export type StageFormat =
+  | "round_robin" // standard league table
+  | "swiss" // UCL 2024+ style pairing
+  | "knockout" // single/two-leg elimination bracket
+  | "group_round_robin"; // N groups each doing round-robin internally
+
+export type TiebreakerCriteria =
+  | "points"
+  | "gd" // overall goal difference
+  | "gf" // overall goals for
+  | "h2h_points" // head-to-head points between tied teams
+  | "h2h_gd"
+  | "h2h_gf"
+  | "h2h_away_goals" // away goals in H2H (rare post-2021)
+  | "away_gd" // away GD across all games
+  | "away_gf"
+  | "fair_play" // lowest disciplinary points (yellow=1, red=3)
+  | "ranking" // pre-tournament seeding/ranking
+  | "lots"; // drawing of lots
+
+export interface StageConfig {
+  id: string; // e.g. 'group_stage', 'r16', 'final'
+  name: string;
+
+  format: StageFormat;
+
+  // Round-robin / group
+  num_groups?: number; // 1 = single table, 2+ = multi-group
+  teams_per_group?: number;
+  legs?: 1 | 2; // single or double round-robin within group/stage
+
+  // Swiss
+  rounds?: number; // number of pairings in swiss system
+
+  // Advancement rules
+  num_teams?: number; // total teams entering this stage
+  advance_per_group?: number; // teams advancing from each group
+  advance_best_runners_up?: number; // best N runners-up also advance (e.g., WC groups)
+  title_from_position?: number; // which position is "champion" (usually 1)
+  promotion_spots?: number; // how many promoted to division above
+  relegation_spots?: number; // how many relegated
+
+  // Knockout specifics
+  away_goals?: boolean; // away goals rule (false = off, deprecated post-2021 UCL)
+  neutral_venue?: boolean; // matches on neutral ground
+  extra_time?: boolean; // extra time if draw
+  penalties?: boolean; // penalties if still level after ET
+  has_third_place?: boolean;
+
+  // Seeding into this stage
+  seeding?: "draw" | "ranked" | "pot";
+  seed_from_stage?: string; // inherit seeding from prior stage id
+
+  // Tiebreaker order (applied top to bottom)
+  tiebreaker?: TiebreakerCriteria[];
+
+  // Card accumulation reset at start of this stage
+  reset_card_accumulation?: boolean;
+}
+
+// ─── Foreign Player Rules ─────────────────────────────────────────────────────
+
+export interface SpecialForeignSlot {
+  name: string; // 'AFC', 'ASEAN', 'U23_foreign', etc.
+  extra_count: number;
+  criteria: {
+    confederation?: string; // e.g. 'AFC'
+    region?: string; // e.g. 'ASEAN'
+    max_age?: number; // for age-capped slot
+    min_age?: number;
+  };
+}
+
+export interface HomegrownDefinition {
+  trained_years: number; // min consecutive/total years
+  before_age: number; // must have trained before this age
+  scope: "club" | "national"; // trained at this club vs anywhere in country
+}
+
+export interface ForeignRuleSet {
+  no_limit?: boolean; // if true, all caps below are ignored
+
+  // Hard caps (null = no limit on that specific dimension)
+  squad_limit?: number | null;
+  matchday_limit?: number | null;
+  field_limit?: number | null;
+  starting_limit?: number | null;
+
+  // Additional quota slots beyond base cap
+  special_slots?: SpecialForeignSlot[];
+
+  // Local player obligations
+  local_starting_min?: number; // min locals in starting XI
+  u23_local_min_field?: number; // min U23 locals on field at all times
+
+  // Homegrown
+  homegrown_min_squad?: number;
+  homegrown_definition?: HomegrownDefinition;
+
+  // Naturalized players
+  naturalized_counts_as?: "foreign" | "domestic" | "conditional";
+
+  // Exemptions: these nationalities/confederations never counted as foreign
+  exempt_confederations?: string[];
+  exempt_regions?: string[];
+
+  // Special systems
+  permit_system?: string; // e.g. 'GBE' (UK work permit)
+  salary_cap_instead?: boolean; // MLS: cap controls foreigners, not nationality
+}
+
+// ─── Card Rules ───────────────────────────────────────────────────────────────
+
+export interface CardRules {
+  yellow_suspend_at: number; // yellows accumulated before 1-match ban
+  red_ban_matches: number; // automatic ban for direct red (default 1)
+  violent_conduct_ban: number; // additional ban for violent conduct (default 3)
+  dissent_ban?: number;
+  // Rounds/stages where yellow accumulation resets
+  accumulation_reset_stages?: string[]; // stage ids where count clears
+}
+
+// ─── Awards ──────────────────────────────────────────────────────────────────
+
+export type AwardCriteria =
+  | "most_goals"
+  | "most_assists"
+  | "most_goals_assists"
+  | "best_avg_rating"
+  | "most_clean_sheets"
+  | "best_gk_rating"
+  | "best_young_player" // under age_limit
+  | "manager_of_season"
+  | "best_xi_vote";
+
+export interface AwardDefinition {
+  id: string;
+  name: string;
+  criteria: AwardCriteria;
+  age_limit?: number; // for young player award
+  position_filter?: Position[]; // restrict to position(s)
+  prize_money?: number;
+}
+
+// ─── Competition Config ───────────────────────────────────────────────────────
+
+export type CompetitionStatus = "active" | "proposed" | "passed" | "superseded";
+export type ProposerType = "system" | "club_owner" | "federation";
+
+export interface CompetitionConfig {
+  id: number;
+  league_id: number;
+  season_apply: number; // first season this config is in effect
+
+  stages: StageConfig[];
+  foreign_rules: ForeignRuleSet;
+  card_rules: CardRules;
+  awards: AwardDefinition[];
+
+  max_squad_size: number;
+  max_matchday_squad: number;
+
+  proposed_by: number | null;
+  proposer_type: ProposerType;
+  status: CompetitionStatus;
+  created_day: number;
+}
+
+// ─── Format Proposals & Voting ────────────────────────────────────────────────
+
+export type ProposalStatus = "open" | "passed" | "rejected" | "withdrawn";
+export type VoteChoice = "for" | "against" | "abstain";
+
+export interface FormatProposal {
+  id: number;
+  league_id: number;
+  proposed_by: number;
+  proposer_type: ProposerType;
+  season_apply: number;
+  // Full config JSON stored as TEXT in DB
+  proposed_stages: StageConfig[];
+  proposed_foreign_rules: ForeignRuleSet;
+  proposed_card_rules: CardRules;
+  votes_for: number;
+  votes_against: number;
+  votes_abstain: number;
+  threshold: number; // e.g. 0.51 simple majority, 0.667 supermajority
+  status: ProposalStatus;
+  created_day: number;
+  deadline_day: number;
+}
+
+export interface FormatVote {
+  proposal_id: number;
+  voter_id: number;
+  voter_type: "club_owner" | "federation_member";
+  vote: VoteChoice;
+  voted_day: number;
+}

@@ -105,7 +105,8 @@ function createSchema(db: Database): void {
       reputation INTEGER DEFAULT 30,
       continent TEXT,
       format TEXT DEFAULT 'league',
-      slots INTEGER DEFAULT 18
+      slots INTEGER DEFAULT 18,
+      active_config_id INTEGER   -- FK → competition_configs.id
     );
 
     CREATE TABLE IF NOT EXISTS league_slots (
@@ -116,6 +117,8 @@ function createSchema(db: Database): void {
       market_value INTEGER DEFAULT 0
     );
 
+    -- Fixtures + results share one table.
+    -- home_goals IS NULL = unplayed fixture.
     CREATE TABLE IF NOT EXISTS match_results (
       id INTEGER PRIMARY KEY,
       league_id INTEGER,
@@ -123,7 +126,11 @@ function createSchema(db: Database): void {
       away_club INTEGER,
       home_goals INTEGER,
       away_goals INTEGER,
-      date INTEGER,
+      date INTEGER,               -- absolute in-game day
+      week INTEGER DEFAULT 0,     -- matchday number within competition
+      stage_id TEXT DEFAULT 'league', -- which stage this match belongs to
+      group_num INTEGER DEFAULT 0,    -- 0 = no groups; 1+ = group number
+      competition TEXT DEFAULT 'liga1',
       stats TEXT DEFAULT '{}',
       scorers TEXT DEFAULT '[]'
     );
@@ -132,6 +139,7 @@ function createSchema(db: Database): void {
       id INTEGER PRIMARY KEY,
       player_id INTEGER NOT NULL,
       club_id INTEGER,
+      competition_id INTEGER,     -- FK → competition_configs.id
       season INTEGER NOT NULL,
       matches INTEGER DEFAULT 0,
       goals INTEGER DEFAULT 0,
@@ -141,6 +149,66 @@ function createSchema(db: Database): void {
       red_cards INTEGER DEFAULT 0,
       clean_sheets INTEGER DEFAULT 0,
       league_id INTEGER
+    );
+
+    -- Card accumulation per player per competition (resets per config rules).
+    CREATE TABLE IF NOT EXISTS card_accumulation (
+      id INTEGER PRIMARY KEY,
+      player_id INTEGER NOT NULL,
+      competition_id INTEGER NOT NULL,
+      season INTEGER NOT NULL,
+      yellow_count INTEGER DEFAULT 0,
+      red_count INTEGER DEFAULT 0,
+      suspended_matches_remaining INTEGER DEFAULT 0,
+      UNIQUE(player_id, competition_id, season)
+    );
+
+    -- Competition format configs. One row = one season's ruleset for a league.
+    CREATE TABLE IF NOT EXISTS competition_configs (
+      id INTEGER PRIMARY KEY,
+      league_id INTEGER NOT NULL,
+      season_apply INTEGER NOT NULL,  -- first season this config is active
+      name TEXT NOT NULL,
+      stages TEXT NOT NULL,           -- JSON: StageConfig[]
+      foreign_rules TEXT NOT NULL,    -- JSON: ForeignRuleSet
+      card_rules TEXT NOT NULL,       -- JSON: CardRules
+      awards TEXT NOT NULL,           -- JSON: AwardDefinition[]
+      max_squad_size INTEGER DEFAULT 25,
+      max_matchday_squad INTEGER DEFAULT 18,
+      proposed_by INTEGER,
+      proposer_type TEXT DEFAULT 'system',
+      status TEXT DEFAULT 'active',   -- 'active'|'proposed'|'passed'|'superseded'
+      created_day INTEGER DEFAULT 0,
+      UNIQUE(league_id, season_apply)
+    );
+
+    -- Format change proposals submitted by club owners or federations.
+    CREATE TABLE IF NOT EXISTS format_proposals (
+      id INTEGER PRIMARY KEY,
+      league_id INTEGER NOT NULL,
+      proposed_by INTEGER NOT NULL,
+      proposer_type TEXT NOT NULL,    -- 'club_owner'|'federation'
+      season_apply INTEGER NOT NULL,
+      proposed_stages TEXT NOT NULL,
+      proposed_foreign_rules TEXT NOT NULL,
+      proposed_card_rules TEXT NOT NULL,
+      votes_for INTEGER DEFAULT 0,
+      votes_against INTEGER DEFAULT 0,
+      votes_abstain INTEGER DEFAULT 0,
+      threshold REAL DEFAULT 0.51,
+      status TEXT DEFAULT 'open',     -- 'open'|'passed'|'rejected'|'withdrawn'
+      created_day INTEGER NOT NULL,
+      deadline_day INTEGER NOT NULL
+    );
+
+    -- Individual votes on format proposals.
+    CREATE TABLE IF NOT EXISTS format_votes (
+      proposal_id INTEGER NOT NULL,
+      voter_id INTEGER NOT NULL,
+      voter_type TEXT NOT NULL,       -- 'club_owner'|'federation_member'
+      vote TEXT NOT NULL,             -- 'for'|'against'|'abstain'
+      voted_day INTEGER NOT NULL,
+      PRIMARY KEY(proposal_id, voter_id)
     );
 
     CREATE TABLE IF NOT EXISTS world_state (
