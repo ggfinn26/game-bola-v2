@@ -34,9 +34,10 @@ Last updated: 2026-10-17 (session 3)
 
 ### Reference Games Analyzed
 
-- [x] Football Agent — player schema, event structure (32 events), agent mechanics
-- [x] Footballer Career — wheel engine, injury types, social media system
-- [x] My Legacy — life sim (611 events, 25 categories, per career phase)
+- [x] Football Agent — player schema, event structure (32 events), agent mechanics, `pla_names` SQLite name pool
+- [x] Footballer Career — wheel engine, injury types, social media system, `isimHavuzu` name pool
+- [x] My Legacy — life sim (611 events, 25 categories, per career phase), `NAMES_BY_COUNTRY` + LCG fallback pool
+- [x] Name Generation doc — `NAME-GENERATION.md` (comparison, schemas, bytecode decompilation, takeaways)
 
 ---
 
@@ -47,7 +48,7 @@ Last updated: 2026-10-17 (session 3)
 - [x] Legal System doc — `LEGAL-SYSTEM.md` (triggers, 3 paths, sentencing, reputation, media exposure)
 - [x] Multi-mode World doc — `MULTI-MODE-WORLD.md` (shared state, ego switching, cross-mode events, legacy score)
 - [x] Slot Liga & Bankruptcy doc — `SLOT-LIGA-BANKRUPTCY.md` (slot market, bankruptcy sequence, loan shark, agent bankruptcy)
-- [ ] Dynamic PA Formula doc — detailed delta formula (outlined in GAME-ENGINE.md §3, needs validation)
+- [x] Dynamic PA Formula doc — validated & fixed: skala 0–100, pa_ceiling per pemain, prison/inactivity decay order fixed, delta magnitudes scaled ×5
 
 ### Implementation
 
@@ -70,11 +71,18 @@ Last updated: 2026-10-17 (session 3)
 - [x] Competition config system — `StageConfig[]`, `ForeignRuleSet`, `CardRules`, `AwardDefinition` di `types/index.ts`
 - [x] DB schema — `competition_configs`, `card_accumulation`, `format_proposals`, `format_votes`; update `match_results` (stage_id, group_num), `leagues` (active_config_id), `player_stats` (competition_id)
 - [x] Default Liga 1 config di-insert ke DB saat worldgen (`insertLiga1Config`)
-- [ ] Event system implementation
-- [ ] League table + standings UI
-- [ ] Tonton Match (step-by-step wheel display)
-- [ ] Card accumulation logic (query card_accumulation, apply suspension)
-- [ ] Multi-stage fixture generation (baca StageConfig, handle group_count > 1)
+- [x] League table + standings UI (`LeagueTable.svelte`, `getStandings`)
+- [x] Player Ego & Profil Pemain — `createEgoPlayer` ke DB, `getPlayer`, update stat pemain (`matches`, `goals`, `assists`, `rating`, `form`, `legacy_score`) tiap matchday, dan panel profil/kontrak di `CareerLoop.svelte`
+- [x] Tonton Match (step-by-step wheel display — `wheelSim` di `match.ts` + `MatchWheel.svelte`)
+- [x] Card accumulation & Injury system (`card_accumulation` + skorsing otomatis, 5 tier cedera `rollMatchInjury` + `healInjuries` di `scheduler.ts`)
+- [x] Event system implementation (`events.ts` + `EventModal.svelte` — condition gating per career phase/trait, social reactions, trait mutation & intensity)
+- [x] Season Rollover & Dynamic PA/CA (`rolloverSeason` di `scheduler.ts` — trofi juara, arsip `player_stats`, rekalkulasi PA/CA & atribut via `recalcPACA`, umur +1, reset klasemen & generate jadwal musim baru)
+- [x] Bursa Transfer & Kontrak Pemain (`transfers.ts` + `TransferModal.svelte` — tawaran perpanjangan & pindah klub berbasis OVR/form/reputasi, otomatis terbuka di akhir musim atau via tombol manual)
+- [x] Riwayat Karir & Statistik Liga (`awards.ts` + `StatsBoard.svelte` — Top Skor, Top Assist, Rating Terbaik, arsip `player_stats` per musim, serta penghargaan akhir musim Sepatu Emas, MVP, & Pemain Muda Terbaik U-21)
+- [x] Multi-stage fixture generation (`stages.ts` — baca `StageConfig`, dukung `group_count > 1`, plus mode Championship Series Knockout Semifinal & Final 4 Besar)
+- [x] Mode Manajer (`ManagerLoop.svelte` + `ManagerTransferModal.svelte` — rekrut Free Agent, lepas pemain, pantau skuad & tonton match)
+- [x] Mode Agen (`agent.ts` + `AgentLoop.svelte` — scouting dengan ketidakpastian `judge_ca`/`judge_pa`, manajemen klien & upgrade kantor, negosiasi komisi 15%, komplotan rumor media, dan kebangkrutan agensi)
+- [x] Mode Pemilik Klub (`owner.ts` + `OwnerLoop.svelte` — manajemen kas & gaji klub, pinjaman bank berbunga sesuai skor kredit, suntik modal/dividen, negosiasi sponsor, upgrade fasilitas/akademi/stadion, sistem kebangkrutan 3x gagal bayar, serta jual/beli klub & Bursa Slot Liga)
 - [ ] Format proposal + voting mechanic
 
 ---

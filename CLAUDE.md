@@ -9,6 +9,7 @@ Working directory: `/Users/rismaniswaty/Downloads/GAME-BOLA/`
 
 - `PRD.md` — full product requirements, all game systems
 - `GAME-ENGINE.md` — match sim formulas, PA dynamics, world tick
+- `NAME-GENERATION.md` — country-based name generation analysis across the 3 reference games
 - `CHECKPOINT.md` — current progress & next steps
 - `penjelasan-permainan.md` — original game description (reference only)
 
@@ -37,8 +38,8 @@ Turkish-derived names from reference game are retired. Use:
 
 ## Reference Games Analyzed
 
-| Game              | APK location                 | Key mechanic extracted                                        |
-| ----------------- | ---------------------------- | ------------------------------------------------------------- |
-| Football Agent    | `football_agent_decoded/`    | Player schema, event structure, agent office                  |
-| Footballer Career | `footballer_career_decoded/` | Wheel engine, injury types, social media system               |
-| My Legacy         | `my_legacy_decoded/`         | Life sim events (611 events, 25 categories, per career phase) |
+| Game              | APK location                 | Key mechanic extracted                                                      |
+| ----------------- | ---------------------------- | --------------------------------------------------------------------------- |
+| Football Agent    | `football_agent_decoded/`    | Player schema, event structure, agent office, `pla_names` SQLite pool       |
+| Footballer Career | `footballer_career_decoded/` | Wheel engine, injury types, social media system, `isimHavuzu` name pool     |
+| My Legacy         | `my_legacy_decoded/`         | Life sim events (611 events, 25 categories), `NAMES_BY_COUNTRY` + LCG pool  |

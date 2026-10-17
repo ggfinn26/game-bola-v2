@@ -4,7 +4,7 @@ import { defineConfig } from "vite";
 export default defineConfig({
   plugins: [svelte()],
   optimizeDeps: {
-    exclude: ["sql.js"],
+    include: ["sql.js"],
   },
   server: {
     headers: {

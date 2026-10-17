@@ -1,8 +1,9 @@
-import initSqlJs, { type Database } from "sql.js";
+import type { Database } from "sql.js";
 
 let db: Database | null = null;
 
 export async function initDB(): Promise<Database> {
+  const { default: initSqlJs } = await import("sql.js");
   const SQL = await initSqlJs({
     locateFile: (file: string) => `/sql.js/${file}`,
   });
@@ -14,6 +15,18 @@ export async function initDB(): Promise<Database> {
 export function getDB(): Database {
   if (!db) throw new Error("DB not initialized");
   return db;
+}
+
+export function exportDB(): Uint8Array {
+  if (!db) throw new Error("DB not initialized");
+  return db.export();
+}
+
+export async function loadDB(data: Uint8Array): Promise<void> {
+  const { default: initSqlJs } = await import("sql.js");
+  const SQL = await initSqlJs({ locateFile: (f: string) => `/sql.js/${f}` });
+  db = new SQL.Database(data);
+  createSchema(db);
 }
 
 function createSchema(db: Database): void {
@@ -31,14 +44,32 @@ function createSchema(db: Database): void {
       foot TEXT,
       ca INTEGER DEFAULT 1,
       pa INTEGER DEFAULT 1,
+      pa_ceiling INTEGER DEFAULT 100,
       overall INTEGER DEFAULT 1,
-      attacking INTEGER DEFAULT 1,
-      defending INTEGER DEFAULT 1,
-      technical INTEGER DEFAULT 1,
-      mental INTEGER DEFAULT 1,
-      physical INTEGER DEFAULT 1,
-      speed INTEGER DEFAULT 1,
-      goalkeeping INTEGER DEFAULT 0,
+      finishing INTEGER DEFAULT 1,
+      passing INTEGER DEFAULT 1,
+      dribbling INTEGER DEFAULT 1,
+      heading INTEGER DEFAULT 1,
+      crossing INTEGER DEFAULT 1,
+      tackling INTEGER DEFAULT 1,
+      technique INTEGER DEFAULT 1,
+      long_shots INTEGER DEFAULT 1,
+      decisions INTEGER DEFAULT 1,
+      composure INTEGER DEFAULT 1,
+      positioning INTEGER DEFAULT 1,
+      vision INTEGER DEFAULT 1,
+      anticipation INTEGER DEFAULT 1,
+      off_the_ball INTEGER DEFAULT 1,
+      work_rate INTEGER DEFAULT 1,
+      pace INTEGER DEFAULT 1,
+      strength INTEGER DEFAULT 1,
+      agility INTEGER DEFAULT 1,
+      jumping INTEGER DEFAULT 1,
+      reflexes INTEGER DEFAULT 0,
+      handling INTEGER DEFAULT 0,
+      gk_positioning INTEGER DEFAULT 0,
+      one_on_ones INTEGER DEFAULT 0,
+      command INTEGER DEFAULT 0,
       stamina REAL DEFAULT 1.0,
       form REAL DEFAULT 0.5,
       injury_prone INTEGER DEFAULT 3,
@@ -66,7 +97,8 @@ function createSchema(db: Database): void {
       career_trophies INTEGER DEFAULT 0,
       agent_id INTEGER,
       contract_end INTEGER,
-      wage INTEGER DEFAULT 0
+      wage INTEGER DEFAULT 0,
+      appearance TEXT DEFAULT '{}'
     );
 
     CREATE TABLE IF NOT EXISTS clubs (
@@ -95,6 +127,28 @@ function createSchema(db: Database): void {
       goals_for INTEGER DEFAULT 0,
       goals_against INTEGER DEFAULT 0,
       points INTEGER DEFAULT 0
+    );
+
+    CREATE TABLE IF NOT EXISTS agents (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      reputation INTEGER DEFAULT 20,
+      cash INTEGER DEFAULT 30000000,
+      monthly_costs INTEGER DEFAULT 2000000,
+      credit_score INTEGER DEFAULT 60,
+      consecutive_missed INTEGER DEFAULT 0,
+      bankrupt INTEGER DEFAULT 0,
+      office_level INTEGER DEFAULT 0,
+      judge_ca INTEGER DEFAULT 45,
+      judge_pa INTEGER DEFAULT 45
+    );
+
+    CREATE TABLE IF NOT EXISTS owners (
+      id INTEGER PRIMARY KEY,
+      name TEXT NOT NULL,
+      personal_cash INTEGER DEFAULT 15000000000,
+      reputation INTEGER DEFAULT 50,
+      credit_score INTEGER DEFAULT 75
     );
 
     CREATE TABLE IF NOT EXISTS leagues (

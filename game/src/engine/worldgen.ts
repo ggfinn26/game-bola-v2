@@ -1,4 +1,5 @@
 import { getDB } from "./db.js";
+import { calcPlayerCA, OUTFIELD_ATTRS, GK_ATTRS } from "./pa.js";
 import { LIGA1_CLUBS, INDO_FIRST, INDO_LAST, SQUAD_POSITIONS } from "../data/indonesia.js";
 import type { Position, Trait } from "../types/index.js";
 
@@ -20,7 +21,7 @@ function randInt(min: number, max: number, rng: () => number): number {
 }
 
 function randStat(base: number, spread: number, rng: () => number): number {
-  return Math.max(1, Math.min(20, Math.round(base + (rng() - 0.5) * 2 * spread)));
+  return Math.max(5, Math.min(100, Math.round(base + (rng() - 0.5) * 2 * spread)));
 }
 
 const ALL_TRAITS: Trait[] = [
@@ -56,39 +57,30 @@ function genTraits(rng: () => number): Trait[] {
   return traits;
 }
 
-// Attribute base by position
-function positionBases(pos: Position): Record<string, number> {
-  const bases: Record<Position, Record<string, number>> = {
-    GK: { attacking: 4, defending: 8, technical: 8, mental: 10, physical: 9, speed: 7, goalkeeping: 12 },
-    CB: { attacking: 5, defending: 12, technical: 7, mental: 10, physical: 11, speed: 8, goalkeeping: 1 },
-    LB: { attacking: 8, defending: 10, technical: 8, mental: 9, physical: 10, speed: 10, goalkeeping: 1 },
-    RB: { attacking: 8, defending: 10, technical: 8, mental: 9, physical: 10, speed: 10, goalkeeping: 1 },
-    DM: { attacking: 6, defending: 11, technical: 9, mental: 11, physical: 10, speed: 8, goalkeeping: 1 },
-    CM: { attacking: 9, defending: 9, technical: 10, mental: 10, physical: 9, speed: 9, goalkeeping: 1 },
-    AM: { attacking: 11, defending: 6, technical: 11, mental: 10, physical: 8, speed: 9, goalkeeping: 1 },
-    LW: { attacking: 11, defending: 5, technical: 10, mental: 9, physical: 9, speed: 12, goalkeeping: 1 },
-    RW: { attacking: 11, defending: 5, technical: 10, mental: 9, physical: 9, speed: 12, goalkeeping: 1 },
-    ST: { attacking: 13, defending: 4, technical: 9, mental: 10, physical: 10, speed: 11, goalkeeping: 1 },
-  };
-  return bases[pos];
-}
+// Primary (×1.4) and Secondary (×1.1) attributes per position (§ Worldgen Changes)
+const POSITION_PROFILE: Record<Position, { primary: string[]; secondary: string[] }> = {
+  ST: { primary: ["finishing", "off_the_ball"], secondary: ["heading", "composure", "strength"] },
+  LW: { primary: ["pace", "dribbling"], secondary: ["crossing", "agility", "technique"] },
+  RW: { primary: ["pace", "dribbling"], secondary: ["crossing", "agility", "technique"] },
+  AM: { primary: ["vision", "passing"], secondary: ["finishing", "decisions", "technique"] },
+  CM: { primary: ["passing", "decisions"], secondary: ["vision", "work_rate", "technique"] },
+  DM: { primary: ["positioning", "tackling"], secondary: ["decisions", "work_rate", "strength"] },
+  CB: { primary: ["heading", "positioning"], secondary: ["tackling", "strength", "anticipation"] },
+  LB: { primary: ["pace", "positioning"], secondary: ["crossing", "tackling", "work_rate"] },
+  RB: { primary: ["pace", "positioning"], secondary: ["crossing", "tackling", "work_rate"] },
+  GK: { primary: ["reflexes", "handling"], secondary: ["gk_positioning", "one_on_ones", "command"] },
+};
 
-function calcCA(attrs: Record<string, number>, pos: Position): number {
-  const weights: Record<Position, Record<string, number>> = {
-    GK: { goalkeeping: 0.5, physical: 0.2, mental: 0.2, technical: 0.1 },
-    CB: { defending: 0.4, physical: 0.3, mental: 0.2, technical: 0.1 },
-    LB: { defending: 0.3, speed: 0.25, physical: 0.2, attacking: 0.15, technical: 0.1 },
-    RB: { defending: 0.3, speed: 0.25, physical: 0.2, attacking: 0.15, technical: 0.1 },
-    DM: { defending: 0.35, mental: 0.3, technical: 0.2, physical: 0.15 },
-    CM: { technical: 0.3, mental: 0.3, attacking: 0.2, defending: 0.2 },
-    AM: { attacking: 0.35, technical: 0.35, mental: 0.2, speed: 0.1 },
-    LW: { speed: 0.3, attacking: 0.3, technical: 0.3, mental: 0.1 },
-    RW: { speed: 0.3, attacking: 0.3, technical: 0.3, mental: 0.1 },
-    ST: { attacking: 0.45, technical: 0.25, physical: 0.2, mental: 0.1 },
-  };
-  const w = weights[pos];
-  return Math.round(Object.entries(w).reduce((sum, [k, wt]) => sum + (attrs[k] ?? 5) * wt, 0));
-}
+const GK_RELEVANT_OUTFIELD = new Set([
+  "decisions",
+  "composure",
+  "anticipation",
+  "positioning",
+  "agility",
+  "jumping",
+  "strength",
+  "passing",
+]);
 
 function genPlayer(
   id: number,
@@ -96,23 +88,47 @@ function genPlayer(
   leagueReputation: number,
   pos: Position,
   rng: () => number,
-): object {
+): Record<string, number | string | null> {
   const name = `${pick(INDO_FIRST, rng)} ${pick(INDO_LAST, rng)}`;
   const age = randInt(17, 34, rng);
 
-  // Club quality scale: reputation 50–80 → stat base 7–13
-  const qualBase = 7 + ((leagueReputation - 50) / 30) * 6;
-  const spread = 3;
-  const bases = positionBases(pos);
+  // base = (clubRep / 100) × 40 + rand(±10)
+  const base = Math.max(15, (leagueReputation / 100) * 40 + randInt(-10, 10, rng));
+  const spread = 8;
+  const profile = POSITION_PROFILE[pos];
   const attrs: Record<string, number> = {};
-  for (const [k, b] of Object.entries(bases)) {
-    attrs[k] = randStat(b * (qualBase / 10), spread, rng);
+
+  if (pos === "GK") {
+    for (const k of GK_ATTRS) {
+      const mult = profile.primary.includes(k) ? 1.4 : profile.secondary.includes(k) ? 1.1 : 1.0;
+      attrs[k] = randStat(base * mult, spread, rng);
+    }
+    for (const k of OUTFIELD_ATTRS) {
+      if (GK_RELEVANT_OUTFIELD.has(k)) {
+        attrs[k] = randStat(base, spread, rng);
+      } else if (k === "pace") {
+        attrs[k] = randStat(base * 0.75, spread, rng);
+      } else {
+        attrs[k] = randInt(5, 20, rng);
+      }
+    }
+  } else {
+    for (const k of GK_ATTRS) {
+      attrs[k] = 0;
+    }
+    for (const k of OUTFIELD_ATTRS) {
+      const mult = profile.primary.includes(k) ? 1.4 : profile.secondary.includes(k) ? 1.1 : 1.0;
+      attrs[k] = randStat(base * mult, spread, rng);
+    }
   }
 
-  const ca = calcCA(attrs, pos);
-  // PA: 10–30% above CA, higher for younger players
+  const ca = calcPlayerCA(attrs, pos);
+  // pa_ceiling = max PA this player can ever reach (higher for youth)
+  const ceilMult = age <= 18 ? 0.8 : age <= 21 ? 0.6 : age <= 25 ? 0.4 : age <= 29 ? 0.25 : 0.12;
+  const pa_ceiling = Math.min(100, Math.round(ca * (1 + ceilMult)));
+  // Initial PA: somewhere between CA and ceiling based on age
   const youthBonus = age <= 20 ? 0.25 : age <= 23 ? 0.15 : 0.08;
-  const pa = Math.min(20, Math.round(ca * (1 + youthBonus + rng() * 0.15)));
+  const pa = Math.min(pa_ceiling, Math.round(ca * (1 + youthBonus + rng() * 0.15)));
 
   const traits = genTraits(rng);
   const foot = rng() < 0.75 ? "R" : rng() < 0.5 ? "L" : "both";
@@ -129,6 +145,7 @@ function genPlayer(
     foot,
     ca,
     pa,
+    pa_ceiling,
     overall: ca,
     ...attrs,
     stamina: 1.0,
@@ -158,13 +175,135 @@ function genPlayer(
     career_trophies: 0,
     agent_id: null,
     contract_end: 365 + randInt(0, 730, rng),
-    wage: randInt(5_000_000, 50_000_000, rng) * Math.ceil(ca / 5),
+    wage: randInt(3_000_000, 20_000_000, rng) + ca * 200_000,
   };
+}
+
+function insertPlayerRow(db: ReturnType<typeof getDB>, p: Record<string, number | string | null>): void {
+  db.run(
+    `INSERT OR REPLACE INTO players
+      (id,name,nationality,club,position,age,height,weight,foot,
+       ca,pa,pa_ceiling,overall,
+       finishing,passing,dribbling,heading,crossing,tackling,technique,long_shots,
+       decisions,composure,positioning,vision,anticipation,off_the_ball,work_rate,
+       pace,strength,agility,jumping,
+       reflexes,handling,gk_positioning,one_on_ones,command,
+       stamina,form,injury_prone,traits,trait_intensity,
+       injured,injury_duration,injury_type,retired,free_agent,on_transfer_list,
+       transfer_ban,in_prison,prison_duration,
+       matches,goals,assists,rating,yellow_cards,red_cards,clean_sheets,
+       career_matches,career_goals,career_assists,career_trophies,
+       agent_id,contract_end,wage)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+    [
+      p.id,
+      p.name,
+      p.nationality,
+      p.club,
+      p.position,
+      p.age,
+      p.height,
+      p.weight,
+      p.foot,
+      p.ca,
+      p.pa,
+      p.pa_ceiling,
+      p.overall,
+      p.finishing,
+      p.passing,
+      p.dribbling,
+      p.heading,
+      p.crossing,
+      p.tackling,
+      p.technique,
+      p.long_shots,
+      p.decisions,
+      p.composure,
+      p.positioning,
+      p.vision,
+      p.anticipation,
+      p.off_the_ball,
+      p.work_rate,
+      p.pace,
+      p.strength,
+      p.agility,
+      p.jumping,
+      p.reflexes,
+      p.handling,
+      p.gk_positioning,
+      p.one_on_ones,
+      p.command,
+      p.stamina,
+      p.form,
+      p.injury_prone,
+      p.traits,
+      p.trait_intensity,
+      p.injured,
+      p.injury_duration,
+      p.injury_type,
+      p.retired,
+      p.free_agent,
+      p.on_transfer_list,
+      p.transfer_ban,
+      p.in_prison,
+      p.prison_duration,
+      p.matches,
+      p.goals,
+      p.assists,
+      p.rating,
+      p.yellow_cards,
+      p.red_cards,
+      p.clean_sheets,
+      p.career_matches,
+      p.career_goals,
+      p.career_assists,
+      p.career_trophies,
+      p.agent_id,
+      p.contract_end,
+      p.wage,
+    ],
+  );
+}
+
+export function createEgoPlayer(opts: {
+  name: string;
+  position: Position;
+  age: number;
+  clubId: number;
+  appearance?: string;
+  seed?: number;
+}): number {
+  const db = getDB();
+  const rng = makeLCG(opts.seed ?? 999);
+  const maxRes = db.exec(`SELECT COALESCE(MAX(id), 0) FROM players`);
+  const id = ((maxRes[0]?.values[0]?.[0] as number) ?? 0) + 1;
+
+  const repRes = db.exec(`SELECT reputation FROM clubs WHERE id = ?`, [opts.clubId]);
+  const clubRep = (repRes[0]?.values[0]?.[0] as number) ?? 65;
+
+  const p = genPlayer(id, opts.clubId, clubRep, opts.position, rng);
+  p.name = opts.name;
+  p.age = opts.age;
+  // Protagonist starts with higher ceiling than average player
+  const egoCa = p.ca as number;
+  p.pa_ceiling = Math.min(100, egoCa + 30);
+  p.pa = Math.min(p.pa_ceiling as number, Math.max(egoCa + 10, 60));
+  p.contract_end = 730; // 2-season initial contract
+
+  insertPlayerRow(db, p);
+  if (opts.appearance) {
+    db.run(`UPDATE players SET appearance = ? WHERE id = ?`, [opts.appearance, id]);
+  }
+  return id;
 }
 
 export function generateWorld(seed = 42): void {
   const db = getDB();
   const rng = makeLCG(seed);
+
+  db.run(
+    `DELETE FROM players; DELETE FROM clubs; DELETE FROM agents; DELETE FROM owners; DELETE FROM match_results; DELETE FROM league_slots; DELETE FROM card_accumulation;`,
+  );
 
   // League
   db.run(
@@ -203,73 +342,13 @@ export function generateWorld(seed = 42): void {
     // Insert league slot
     db.run(
       `INSERT OR IGNORE INTO league_slots (id,league_id,club_id,status,market_value) VALUES (?,1,?,'occupied',?)`,
-      [club.id, club.id, club.reputation * 100_000_000],
+      [club.id, club.id, club.reputation * 75_000_000],
     );
 
     // Generate squad
     for (const pos of SQUAD_POSITIONS) {
-      const p = genPlayer(playerId++, club.id, club.reputation, pos, rng) as Record<string, unknown>;
-      db.run(
-        `INSERT OR IGNORE INTO players
-          (id,name,nationality,club,position,age,height,weight,foot,
-           ca,pa,overall,attacking,defending,technical,mental,physical,speed,goalkeeping,
-           stamina,form,injury_prone,traits,trait_intensity,
-           injured,injury_duration,injury_type,retired,free_agent,on_transfer_list,
-           transfer_ban,in_prison,prison_duration,
-           matches,goals,assists,rating,yellow_cards,red_cards,clean_sheets,
-           career_matches,career_goals,career_assists,career_trophies,
-           agent_id,contract_end,wage)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-        [
-          p.id,
-          p.name,
-          p.nationality,
-          p.club,
-          p.position,
-          p.age,
-          p.height,
-          p.weight,
-          p.foot,
-          p.ca,
-          p.pa,
-          p.overall,
-          p.attacking,
-          p.defending,
-          p.technical,
-          p.mental,
-          p.physical,
-          p.speed,
-          p.goalkeeping,
-          p.stamina,
-          p.form,
-          p.injury_prone,
-          p.traits,
-          p.trait_intensity,
-          p.injured,
-          p.injury_duration,
-          p.injury_type,
-          p.retired,
-          p.free_agent,
-          p.on_transfer_list,
-          p.transfer_ban,
-          p.in_prison,
-          p.prison_duration,
-          p.matches,
-          p.goals,
-          p.assists,
-          p.rating,
-          p.yellow_cards,
-          p.red_cards,
-          p.clean_sheets,
-          p.career_matches,
-          p.career_goals,
-          p.career_assists,
-          p.career_trophies,
-          p.agent_id,
-          p.contract_end,
-          p.wage,
-        ],
-      );
+      const p = genPlayer(playerId++, club.id, club.reputation, pos, rng);
+      insertPlayerRow(db, p);
     }
   }
 
@@ -280,68 +359,8 @@ export function generateWorld(seed = 42): void {
   // ~30 free agents
   for (let i = 0; i < 30; i++) {
     const pos = pick(SQUAD_POSITIONS, rng);
-    const p = genPlayer(playerId++, null, 60, pos, rng) as Record<string, unknown>;
-    db.run(
-      `INSERT OR IGNORE INTO players
-        (id,name,nationality,club,position,age,height,weight,foot,
-         ca,pa,overall,attacking,defending,technical,mental,physical,speed,goalkeeping,
-         stamina,form,injury_prone,traits,trait_intensity,
-         injured,injury_duration,injury_type,retired,free_agent,on_transfer_list,
-         transfer_ban,in_prison,prison_duration,
-         matches,goals,assists,rating,yellow_cards,red_cards,clean_sheets,
-         career_matches,career_goals,career_assists,career_trophies,
-         agent_id,contract_end,wage)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        p.id,
-        p.name,
-        p.nationality,
-        p.club,
-        p.position,
-        p.age,
-        p.height,
-        p.weight,
-        p.foot,
-        p.ca,
-        p.pa,
-        p.overall,
-        p.attacking,
-        p.defending,
-        p.technical,
-        p.mental,
-        p.physical,
-        p.speed,
-        p.goalkeeping,
-        p.stamina,
-        p.form,
-        p.injury_prone,
-        p.traits,
-        p.trait_intensity,
-        p.injured,
-        p.injury_duration,
-        p.injury_type,
-        p.retired,
-        p.free_agent,
-        p.on_transfer_list,
-        p.transfer_ban,
-        p.in_prison,
-        p.prison_duration,
-        p.matches,
-        p.goals,
-        p.assists,
-        p.rating,
-        p.yellow_cards,
-        p.red_cards,
-        p.clean_sheets,
-        p.career_matches,
-        p.career_goals,
-        p.career_assists,
-        p.career_trophies,
-        p.agent_id,
-        p.contract_end,
-        p.wage,
-      ],
-    );
+    const p = genPlayer(playerId++, null, 60, pos, rng);
+    insertPlayerRow(db, p);
   }
 }
 
@@ -443,7 +462,7 @@ export function generateFixtures(
   const secondLeg = firstLeg.map((round) => round.map(([h, a]) => [a, h] as [number, number]));
   const allRounds = [...firstLeg, ...secondLeg];
 
-  let matchId = 1;
+  let matchId = ((db.exec("SELECT COALESCE(MAX(id), 0) FROM match_results")[0]?.values[0]?.[0] as number) ?? 0) + 1;
   allRounds.forEach((round, roundIdx) => {
     const matchDay = startDay + roundIdx * daySpacing;
     const weekNum = roundIdx + 1;

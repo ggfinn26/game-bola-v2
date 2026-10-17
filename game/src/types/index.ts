@@ -62,17 +62,43 @@ export interface Player {
   weight: number; // kg
   foot: Foot;
 
-  // Aggregate ratings (1–20)
+  // Aggregate ratings (1–100)
   ca: number;
   pa: number;
+  pa_ceiling: number;
   overall: number;
-  attacking: number;
-  defending: number;
-  technical: number;
-  mental: number;
-  physical: number;
-  speed: number;
-  goalkeeping: number; // GK only, 0 for outfield
+
+  // Technical (8) — 1–100
+  finishing: number;
+  passing: number;
+  dribbling: number;
+  heading: number;
+  crossing: number;
+  tackling: number;
+  technique: number;
+  long_shots: number;
+
+  // Mental (7) — 1–100
+  decisions: number;
+  composure: number;
+  positioning: number;
+  vision: number;
+  anticipation: number;
+  off_the_ball: number;
+  work_rate: number;
+
+  // Physical (4 integer 1–100 + stamina 0.0–1.0 below)
+  pace: number;
+  strength: number;
+  agility: number;
+  jumping: number;
+
+  // GK-Specific (5) — 1–100 for GK, 0 for outfield
+  reflexes: number;
+  handling: number;
+  gk_positioning: number;
+  one_on_ones: number;
+  command: number;
 
   // Dynamic state
   stamina: number; // 0.0–1.0
@@ -233,9 +259,17 @@ export interface GoalEvent {
 export type EventTone = "positive" | "critical" | "neutral" | "humor";
 export type EventRole = "fan" | "critic" | "media" | "neutral" | "rival";
 
+export interface SocialReaction {
+  role: EventRole;
+  handle: string;
+  text: string;
+}
+
 export interface GameEvent {
   id: string;
   category: string;
+  title: string;
+  description: string;
   condition: {
     phase?: CareerPhase[];
     requires_trait?: Trait[];
@@ -245,6 +279,7 @@ export interface GameEvent {
   tone: EventTone;
   priority: number; // 1–5
   max_occurrences: number | null;
+  social_reactions?: SocialReaction[];
   choices: EventChoice[];
 }
 
@@ -257,8 +292,16 @@ export interface EventChoice {
 export interface EventEffects {
   money?: number;
   reputation?: number;
+  form?: number; // delta -1.0 to +1.0
+  stamina?: number; // delta -1.0 to +1.0
+  // v3 attr shortcuts — each +1 unit maps to ×2 on two v3 attrs in applyEventChoice()
+  mental_boost?: number; // → decisions + composure
+  attack_boost?: number; // → finishing + off_the_ball
+  tech_boost?: number; // → technique + passing
+  phys_boost?: number; // → strength + work_rate
   trait_intensity?: Partial<Record<Trait, number>>;
-  mental?: number;
+  add_trait?: Trait;
+  remove_trait?: Trait;
   legal_case?: string;
   media_exposure?: number;
 }

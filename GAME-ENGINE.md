@@ -178,6 +178,8 @@ Variables tersedia: `{t}` (tim), `{m}` (menit), `{s}` (skor), `{p}` (nama pemain
 
 ## 3. Dynamic PA Formula
 
+**Skala:** CA, PA, PA_ceiling, dan semua attribute individual = **0–100**.
+
 ### 3.1 PA Tick
 
 PA dihitung ulang **sekali per season** (bukan per match) untuk menghindari noise.
@@ -191,17 +193,22 @@ performance_score = weighted_avg(
   # games_played_ratio = matches_played / total_matches (0–1)
 ```
 
-**Statistik proxy per posisi:**
+**Statistik proxy per posisi** (menggunakan field yang tersedia di Player type):
 
-| Posisi     | Proxy stats                                              | Weight          |
-| ---------- | -------------------------------------------------------- | --------------- |
-| GK         | clean_sheets / matches, save_rate                        | 50% / 50%       |
-| CB, FB     | tackle_success_rate, interceptions_per90, aerial_won_pct | 40% / 30% / 30% |
-| DM, CM     | pass_success_rate, passes_per90_normalized, assists      | 40% / 30% / 30% |
-| AM, LW, RW | goals_per90, assists_per90                               | 60% / 40%       |
-| ST         | goals_per90, assists_per90                               | 70% / 30%       |
+| Posisi | Proxy stats                        | Weight          |
+| ------ | ---------------------------------- | --------------- |
+| GK     | clean_sheets (0–15), rating (0–10) | 50% / 50%       |
+| CB     | defending, physical, mental        | 50% / 30% / 20% |
+| LB, RB | defending, speed, assists          | 40% / 30% / 30% |
+| DM     | technical, defending, mental       | 40% / 35% / 25% |
+| CM     | technical, mental, assists         | 40% / 30% / 30% |
+| AM     | attacking, technical, assists      | 40% / 30% / 30% |
+| LW, RW | attacking, speed, goals            | 50% / 30% / 20% |
+| ST     | attacking, goals, physical         | 60% / 30% / 10% |
 
-`performance_score` range: 0.0 – 1.0, di-normalize ke skala CA/PA (1–200).
+Attribute dinormalisasi ke 0–1 dengan range `[5, 100]`. Goals/assists range `[0, 30]`.
+
+`performance_score` range: 0.0 – 1.0.
 
 ### 3.2 Delta PA
 
@@ -210,9 +217,9 @@ expected_perf = CA / PA_current   # 0–1, makin tinggi makin "sesuai ekspektasi
 
 delta_PA =
   IF performance_score > expected_perf + 0.10:
-    +rand(1, 3)    # overperform → PA naik
+    +rand(5, 15)   # overperform → PA naik
   ELIF performance_score < expected_perf - 0.15:
-    -rand(1, 2)    # underperform parah → PA turun
+    -rand(5, 10)   # underperform parah → PA turun
   ELSE:
     0              # sesuai ekspektasi → PA stabil
 ```
@@ -220,20 +227,33 @@ delta_PA =
 ### 3.3 Batas & Modifikasi
 
 ```
+# Age modifier hanya berlaku untuk performance delta (bukan decay)
+delta_PA *= age_multiplier
+
 PA_new = clamp(PA_current + delta_PA, CA, PA_ceiling)
 
-# PA_ceiling = nilai max PA yang bisa dicapai pemain ini
-# Ditetapkan saat generate pemain, bisa naik dari late_bloomer event
-
-# Decay saat inaktif:
+# Decay inaktif — diterapkan setelah clamp, independent dari age mult
 IF games_played < 5 dalam season:
-  PA_new = max(CA, PA_new - rand(2, 5))
+  PA_new = max(CA, PA_new - rand(10, 25))
 
-# Decay saat di penjara (per season dipenjara):
-PA_new = max(CA, PA_new - rand(3, 8))
+# Decay penjara — diterapkan paling akhir
+IF in_prison:
+  PA_new = max(CA, PA_new - rand(15, 40))
 ```
 
-**Efek usia:**
+**PA_ceiling per pemain:**
+
+Ditetapkan saat generate pemain berdasarkan usia. Naik via event `late_bloomer`.
+
+| Usia saat generate | Ceiling multiplier dari CA |
+| ------------------ | -------------------------- |
+| ≤ 18               | CA × 1.80                  |
+| 19–21              | CA × 1.60                  |
+| 22–25              | CA × 1.40                  |
+| 26–29              | CA × 1.25                  |
+| 30+                | CA × 1.12                  |
+
+**Efek usia pada delta PA:**
 
 | Rentang usia | Modifier delta PA                           |
 | ------------ | ------------------------------------------- |
@@ -242,7 +262,7 @@ PA_new = max(CA, PA_new - rand(3, 8))
 | 28–31        | ×0.5 (lebih susah naik)                     |
 | 32+          | ×0.3 (hampir tidak naik, lebih mudah turun) |
 
-> **Late bloomer exception:** Event `late_bloomer` bisa raise PA_ceiling + apply ×1.2 multiplier meski usia 28+. Ini yang simulate Kanté, Vardy dll.
+> **Late bloomer exception:** Event `late_bloomer` apply ×1.2 multiplier ke delta PA meski usia 28+, dan tidak bisa PA drop (delta dikunci ≥ 0). Ini simulate Kanté, Vardy, dll.
 
 ### 3.4 CA Update
 
@@ -251,11 +271,11 @@ CA naik/turun berdasarkan training + match time, **bukan** performance score:
 ```
 # Naik jika sering main + training bagus
 IF games_played_ratio > 0.6 AND training_quality > 60:
-  CA += rand(0, 2)
+  CA += rand(0, 10)   # +quick_learner bonus: +1–2 extra
 
 # Turun otomatis di atas usia 30
 IF age > 30:
-  CA -= rand(0, 1)   # per season
+  CA -= rand(0, 5)   # per season
 
 # Hard cap
 CA = clamp(CA, 1, PA_current)
