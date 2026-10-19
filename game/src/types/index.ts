@@ -15,7 +15,7 @@ export const POSITION_CODE: Record<Position, number> = {
 };
 
 export type CareerPhase = "youth" | "pro_step" | "rise" | "prime" | "late";
-export type GameMode = "player" | "manager" | "agent" | "owner";
+export type GameMode = "player" | "manager" | "agent" | "owner" | "pundit";
 export type Foot = "L" | "R" | "both";
 
 export type Trait =
@@ -45,6 +45,21 @@ export type Trait =
   | "injury_magnet"
   | "risk_taker"
   | "clean_cut";
+
+export const EXCLUSIVE_TRAITS: [Trait, Trait][] = [
+  ["professional", "lazy"],
+  ["hot_headed", "composed"],
+  ["ambitious", "content"],
+  ["extrovert", "introvert"],
+  ["media_friendly", "controversial"],
+  ["greedy", "generous"],
+  ["loyal", "mercenary"],
+  ["determination", "fragile_mentally"],
+  ["leader", "disruptive"],
+  ["natural_fitness", "injury_magnet"],
+  ["risk_taker", "clean_cut"],
+  ["wonderkid", "late_bloomer"],
+];
 
 export type InjurySeverity = "minor" | "mild" | "moderate" | "serious" | "career_threatening";
 
@@ -275,6 +290,8 @@ export interface GameEvent {
     requires_trait?: Trait[];
     excludes_trait?: Trait[];
     mode?: GameMode[];
+    requires_overall_min?: number;
+    requires_overall_max?: number;
   };
   tone: EventTone;
   priority: number; // 1–5

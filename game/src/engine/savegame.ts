@@ -1,14 +1,20 @@
 const IDB_NAME = "game-bola-saves";
 const STORE = "saves";
-const SLOT = "slot0";
-const META_KEY = "game-bola-meta";
+const META_PREFIX = "game-bola-meta-";
+export const MAX_SLOTS = 3;
 
 export interface SaveMeta {
+  slot: number;
   playerName: string;
   clubName: string;
   season: number;
   currentDay: number;
   savedAt: number;
+  mode: string;
+}
+
+function slotKey(slot: number) {
+  return `slot${slot}`;
 }
 
 function openIDB(): Promise<IDBDatabase> {
@@ -20,35 +26,53 @@ function openIDB(): Promise<IDBDatabase> {
   });
 }
 
-export async function persistSave(data: unknown): Promise<void> {
+export async function persistSave(data: unknown, slot = 0): Promise<void> {
   const idb = await openIDB();
   return new Promise((resolve, reject) => {
     const tx = idb.transaction(STORE, "readwrite");
-    tx.objectStore(STORE).put(data, SLOT);
+    tx.objectStore(STORE).put(data, slotKey(slot));
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);
   });
 }
 
-export async function readSave(): Promise<unknown | null> {
+export async function readSave(slot = 0): Promise<unknown | null> {
   const idb = await openIDB();
   return new Promise((resolve, reject) => {
     const tx = idb.transaction(STORE, "readonly");
-    const req = tx.objectStore(STORE).get(SLOT);
+    const req = tx.objectStore(STORE).get(slotKey(slot));
     req.onsuccess = () => resolve(req.result ?? null);
     req.onerror = () => reject(req.error);
   });
 }
 
-export function saveMeta(meta: SaveMeta): void {
-  localStorage.setItem(META_KEY, JSON.stringify(meta));
+export async function deleteSlot(slot: number): Promise<void> {
+  const idb = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = idb.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(slotKey(slot));
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  });
 }
 
-export function loadMeta(): SaveMeta | null {
-  const raw = localStorage.getItem(META_KEY);
+export function saveMeta(meta: SaveMeta): void {
+  localStorage.setItem(`${META_PREFIX}${meta.slot}`, JSON.stringify(meta));
+}
+
+export function loadMeta(slot = 0): SaveMeta | null {
+  const raw = localStorage.getItem(`${META_PREFIX}${slot}`);
   return raw ? (JSON.parse(raw) as SaveMeta) : null;
 }
 
-export function clearMeta(): void {
-  localStorage.removeItem(META_KEY);
+export function loadAllMeta(): (SaveMeta | null)[] {
+  return Array.from({ length: MAX_SLOTS }, (_, i) => loadMeta(i));
+}
+
+export function clearMeta(slot = 0): void {
+  localStorage.removeItem(`${META_PREFIX}${slot}`);
+}
+
+export function clearAllMeta(): void {
+  for (let i = 0; i < MAX_SLOTS; i++) clearMeta(i);
 }

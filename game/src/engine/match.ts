@@ -199,6 +199,8 @@ function attributeGoal(players: Player[], minute: number, clubId: number): GoalE
 
 // ─── Full Sim ─────────────────────────────────────────────────────────────────
 
+export type TacticalMentality = "attacking" | "balanced" | "defensive";
+
 export interface SimInput {
   home_club: Club;
   away_club: Club;
@@ -208,33 +210,52 @@ export interface SimInput {
   date: number;
   league_id: number;
   match_id: number;
+  home_mentality?: TacticalMentality;
+  away_mentality?: TacticalMentality;
+  home_staff_bonus?: number; // multiplier e.g. 1.0 to 1.15
+  away_staff_bonus?: number;
 }
 
 const BASE_XG_BY_LEVEL: Record<number, number> = { 1: 1.2, 2: 1.1, 3: 1.0, 4: 0.95 };
 
+function mentalityModifiers(m: TacticalMentality = "balanced"): { att: number; def: number } {
+  if (m === "attacking") return { att: 1.14, def: 0.90 };
+  if (m === "defensive") return { att: 0.88, def: 1.14 };
+  return { att: 1.0, def: 1.0 };
+}
+
 export function fullSim(input: SimInput): MatchResult {
   const { home_club, away_club, home_players, away_players, league_level, date, league_id, match_id } = input;
   const baseXG = BASE_XG_BY_LEVEL[league_level] ?? 0.9;
+  const hMod = mentalityModifiers(input.home_mentality);
+  const aMod = mentalityModifiers(input.away_mentality);
+  const hStaff = input.home_staff_bonus ?? 1.0;
+  const aStaff = input.away_staff_bonus ?? 1.0;
 
-  const homeAttack = zoneRating(home_players, "attack");
-  const homeMid = zoneRating(home_players, "mid");
-  const homeDefense = zoneRating(home_players, "defense");
+  const homeAttack = zoneRating(home_players, "attack") * hMod.att * hStaff;
+  const homeMid = zoneRating(home_players, "mid") * hStaff;
+  const homeDefense = zoneRating(home_players, "defense") * hMod.def * hStaff;
 
-  const awayAttack = zoneRating(away_players, "attack");
-  const awayMid = zoneRating(away_players, "mid");
-  const awayDefense = zoneRating(away_players, "defense");
+  const awayAttack = zoneRating(away_players, "attack") * aMod.att * aStaff;
+  const awayMid = zoneRating(away_players, "mid") * aStaff;
+  const awayDefense = zoneRating(away_players, "defense") * aMod.def * aStaff;
 
   const midAdvHome = homeMid / Math.max(homeMid + awayMid, 1);
   const midAdvAway = 1 - midAdvHome;
 
-  const formHome = 0.85 + mean(home_players, "form") * 0.3;
-  const formAway = 0.85 + mean(away_players, "form") * 0.3;
+  const avgStamHome = mean(home_players, "stamina");
+  const avgStamAway = mean(away_players, "stamina");
+  const stamPenaltyHome = avgStamHome < 0.3 ? 0.75 : avgStamHome < 0.5 ? 0.9 : 1.0;
+  const stamPenaltyAway = avgStamAway < 0.3 ? 0.75 : avgStamAway < 0.5 ? 0.9 : 1.0;
+
+  const formHome = (0.85 + mean(home_players, "form") * 0.3) * stamPenaltyHome;
+  const formAway = (0.85 + mean(away_players, "form") * 0.3) * stamPenaltyAway;
 
   const moraleHome = 0.9 + (home_club.club_morale / 100) * 0.2;
   const moraleAway = 0.9 + (away_club.club_morale / 100) * 0.2;
 
-  const staminaHome = 0.8 + mean(home_players, "stamina") * 0.25;
-  const staminaAway = 0.8 + mean(away_players, "stamina") * 0.25;
+  const staminaHome = 0.8 + avgStamHome * 0.25;
+  const staminaAway = 0.8 + avgStamAway * 0.25;
 
   const xgHome = calcXG(homeAttack, awayDefense, midAdvHome, formHome, moraleHome, staminaHome, 1.15, baseXG);
   const xgAway = calcXG(awayAttack, homeDefense, midAdvAway, formAway, moraleAway, staminaAway, 1.0, baseXG);
@@ -315,6 +336,138 @@ function pickRandom<T>(arr: T[]): T {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
+// ─── Commentary Pool (§2.3 GAME-ENGINE.md) ────────────────────────────────────
+
+export type CommentaryOutcome =
+  | "goal"
+  | "chance_saved"
+  | "chance_missed"
+  | "tackle"
+  | "foul"
+  | "quiet"
+  | "yellow_card"
+  | "red_card";
+
+export const COMMENTARY_POOL: Record<CommentaryOutcome, readonly string[]> = {
+  goal: [
+    "GOL! {scorer} menjebol gawang lawan untuk {team}{assist}!",
+    "GOL SPEKTAKULER! Sepakan keras {scorer} membuat pendukung {team} bersorak{assist}!",
+    "GOL! Penyelesaian dingin dari {scorer} menambah keunggulan {team}{assist}!",
+    "GOL INDAH! {scorer} menuntaskan skema serangan {team} dengan sempurna{assist}!",
+    "GOL! Sundulan tajam {scorer} menggetarkan jala lawan untuk {team}{assist}!",
+    "GOL! {scorer} lolos dari kawalan bek dan mencetak gol bagi {team}{assist}!",
+    "GOL! Tembakan melengkung {scorer} tak mampu dibendung kiper, poin penuh bagi {team}{assist}!",
+    "GOL! {scorer} menyambar bola liar di kotak penalti untuk membawa {team} unggul{assist}!",
+    "GOL CANTIK! Aksi individu memukau {scorer} berbuah gol manis bagi {team}{assist}!",
+    "GOL! {team} berpesta setelah {scorer} menempatkan bola tepat ke sudut gawang{assist}!",
+  ],
+  chance_saved: [
+    "Tembakan keras pemain {team} berhasil ditepis dengan gemilang oleh kiper lawan!",
+    "Peluang emas {team} digagalkan lewat penyelamatan akrobatik penjaga gawang!",
+    "Kiper tampil sigap menangkap sepakan terarah dari lini serang {team}.",
+    "Refleks luar biasa kiper menggagalkan tembakan jarak dekat {team}!",
+    "Sepakan melengkung dari {team} masih mampu dijangkau ujung jari kiper.",
+    "Penyelamatan krusial! Kiper menepis bola hasil tendangan keras {team}.",
+    "Serangan berbahaya {team} mentah di tangan kiper yang berdiri di posisi tepat.",
+    "Duel satu lawan satu dimenangkan kiper, peluang matang {team} pun kandas!",
+    "Sundulan tajam pemain {team} berhasil diamankan kiper tepat di garis gawang.",
+    "Tembakan mendatar dari {team} ditepis keluar lapangan oleh penjaga gawang.",
+  ],
+  chance_missed: [
+    "Peluang {team} terbuang percuma setelah bola melambung tinggi di atas mistar.",
+    "Sayang sekali! Sepakan pemain {team} masih melebar tipis di sisi gawang.",
+    "TIANG GAWANG! Tembakan keras dari {team} hanya membentur mistar gawang!",
+    "Penyelesaian akhir {team} kurang tenang sehingga bola melenceng jauh dari sasaran.",
+    "Sundulan pemain {team} menyambut umpan silang masih belum menemui target.",
+    "Tendangan bebas berbahaya dari {team} meluncur tipis di atas palang gawang.",
+    "Hakim garis mengangkat bendera, serangan berbahaya {team} terjebak offside.",
+    "Sepakan voli spekulatif dari {team} masih menyamping dari gawang lawan.",
+    "Peluang terbuka bagi {team}, namun tembakan akhirnya gagal mengarah ke gawang.",
+    "Bola hasil tekanan {team} hanya melintas di depan mulut gawang tanpa sambutan.",
+  ],
+  tackle: [
+    "Pertahanan rapat! Bek lawan dengan sigap memotong umpan terobosan berbahaya.",
+    "Tekel bersih yang sangat krusial berhasil menghentikan laju penyerang di kotak penalti.",
+    "Barisan belakang tampil disiplin menutup ruang tembak dan menyapu bola keluar.",
+    "Intersep cerdas di lini tengah langsung mematahkan alur serangan lawan.",
+    "Duel fisik dimenangkan bek bertahan, bola berhasil diamankan tanpa pelanggaran.",
+    "Sapuan kepala yang lugas dari jantung pertahanan menjauhkan bola dari zona bahaya.",
+    "Blok berani dari pemain belakang menggagalkan percobaan tembakan ke arah gawang.",
+    "Koordinasi lini pertahanan yang solid membuat penyerang lawan kehilangan bola.",
+    "Antisipasi sempurna! Umpan silang berbahaya berhasil dipotong sebelum sampai ke target.",
+    "Tekel meluncur yang presisi merebut kembali penguasaan bola di area krusial.",
+  ],
+  foul: [
+    "Pelanggaran dilakukan pemain {team} saat mencoba menghentikan serangan lawan.",
+    "Wasit meniup peluit, pelanggaran keras terjadi dari lini tengah {team}.",
+    "Pemain {team} menarik baju lawan hingga terjatuh, tendangan bebas diberikan.",
+    "Tekel terlambat dari pemain {team} berbuah tendangan bebas bagi lawan.",
+    "Dorongan dari belakang oleh pemain {team} langsung dianggap pelanggaran oleh wasit.",
+    "Duel udara berujung pelanggaran setelah pemain {team} mengangkat kaki terlalu tinggi.",
+    "Wasit memberikan peringatan lisan kepada pemain {team} usai pelanggaran di sisi sayap.",
+    "Laju serangan terhenti akibat hadangan ilegal dari pemain bertahan {team}.",
+    "Pelanggaran taktis dilakukan {team} demi meredam skema serangan balik cepat.",
+    "Wasit menunjuk titik pelanggaran setelah pemain {team} menjatuhkan lawan.",
+  ],
+  quiet: [
+    "Kedua tim masih berhati-hati memainkan bola di lini tengah mencari celah pertahanan.",
+    "Tempo pertandingan sedikit melambat, bola mengalir dari kaki ke kaki di area tengah.",
+    "Pertarungan sengit di lini tengah membuat belum ada peluang bersih yang tercipta.",
+    "Para pemain tampak mengatur napas sambil menjaga kedalaman formasi masing-masing.",
+    "Sirkulasi umpan pendek diperagakan untuk memancing lawan keluar dari sarangnya.",
+    "Belum ada celah berarti, kedua kesebelasan sama-sama rapat menjaga garis pertahanan.",
+    "Bola lebih banyak bergulir di area tengah lapangan tanpa ancaman serius ke gawang.",
+    "Serangan balik cepat coba dibangun, namun lini pertahanan lawan sudah kembali rapi.",
+    "Kedua pelatih tampak memberikan instruksi dari pinggir lapangan di tengah duel taktis ini.",
+    "Penguasaan bola berpindah tangan beberapa kali akibat ketatnya pressing di lini tengah.",
+  ],
+  yellow_card: [
+    "KARTU KUNING! Wasit mengeluarkan kartu kuning untuk pemain {team} akibat tekel keras.",
+    "Pemain {team} diganjar kartu kuning setelah melakukan pelanggaran taktis.",
+    "Kartu kuning diberikan kepada pemain {team} karena mengulur-ulur waktu pertandingan.",
+    "Protes berlebihan kepada wasit membuat pemain {team} dihadiahi kartu kuning.",
+    "Tekel dari belakang memaksa wasit merogoh kartu kuning untuk pemain {team}.",
+    "Kartu kuning bagi {team} usai menjatuhkan lawan yang sedang melancarkan serangan balik.",
+    "Wasit tanpa ragu mengangkat kartu kuning untuk pelanggaran ceroboh pemain {team}.",
+    "Peringatan keras berupa kartu kuning diterima pemain {team} di laga yang kian memanas.",
+    "Tarikan kaus yang jelas membuat pemain {team} harus rela menerima kartu kuning.",
+    "Pelanggaran berulang kali akhirnya berbuah kartu kuning bagi penggawa {team}.",
+  ],
+  red_card: [
+    "KARTU MERAH! Tekel dua kaki yang sangat berbahaya membuat pemain {team} diusir keluar!",
+    "KARTU MERAH LANGSUNG! {team} harus bermain dengan sepuluh orang usai pelanggaran brutal!",
+    "Bencana bagi {team}! Wasit mencabut kartu merah karena menggagalkan peluang emas lawan!",
+    "KARTU MERAH! Emosi tak terkendali membuat pemain {team} mendapat pengusiran dari wasit!",
+    "Wasit menunjuk ruang ganti! Kartu merah diberikan kepada pemain {team} akibat sikutan keras!",
+    "KARTU MERAH! Akumulasi pelanggaran keras memaksa pemain {team} meninggalkan lapangan lebih cepat!",
+    "Petaka untuk {team}! Pelanggaran sebagai orang terakhir berujung kartu merah mutlak!",
+    "KARTU MERAH! Keputusan tegas wasit mengusir pemain {team} mengubah jalannya laga!",
+    "Tindakan tidak sportif membuat pemain {team} langsung diganjar kartu merah oleh wasit!",
+    "KARTU MERAH! Tekel berbahaya dari pemain {team} tak bisa ditoleransi lagi oleh wasit!",
+  ],
+};
+
+const lastCommentaryIdx: Partial<Record<CommentaryOutcome, number>> = {};
+
+export function commentary(
+  outcome: CommentaryOutcome,
+  team: string = "",
+  scorer?: string,
+  assist?: string | null,
+): string {
+  const pool = COMMENTARY_POOL[outcome];
+  const prev = lastCommentaryIdx[outcome] ?? -1;
+  let idx = Math.floor(Math.random() * (pool.length - (prev >= 0 ? 1 : 0)));
+  if (prev >= 0 && idx >= prev) idx++;
+  lastCommentaryIdx[outcome] = idx;
+
+  const assistText = assist ? ` (Assist: ${assist})` : "";
+  return pool[idx]
+    .replace("{scorer}", scorer || "Pemain")
+    .replace("{team}", team)
+    .replace("{assist}", assistText);
+}
+
 // Non-uniform minute generator: higher density in 30–45' and 75–90'
 function sampleAttackMinute(): number {
   const r = Math.random();
@@ -326,14 +479,18 @@ function sampleAttackMinute(): number {
 export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchStep[] } {
   const { home_club, away_club, home_players, away_players, league_level, date, league_id, match_id } = input;
   const baseXG = BASE_XG_BY_LEVEL[league_level] ?? 0.9;
+  const hMod = mentalityModifiers(input.home_mentality);
+  const aMod = mentalityModifiers(input.away_mentality);
+  const hStaff = input.home_staff_bonus ?? 1.0;
+  const aStaff = input.away_staff_bonus ?? 1.0;
 
-  const homeAttack = zoneRating(home_players, "attack");
-  const homeMid = zoneRating(home_players, "mid");
-  const homeDefense = zoneRating(home_players, "defense");
+  const homeAttack = zoneRating(home_players, "attack") * hMod.att * hStaff;
+  const homeMid = zoneRating(home_players, "mid") * hStaff;
+  const homeDefense = zoneRating(home_players, "defense") * hMod.def * hStaff;
 
-  const awayAttack = zoneRating(away_players, "attack");
-  const awayMid = zoneRating(away_players, "mid");
-  const awayDefense = zoneRating(away_players, "defense");
+  const awayAttack = zoneRating(away_players, "attack") * aMod.att * aStaff;
+  const awayMid = zoneRating(away_players, "mid") * aStaff;
+  const awayDefense = zoneRating(away_players, "defense") * aMod.def * aStaff;
 
   const midAdvHome = homeMid / Math.max(homeMid + awayMid, 1);
   const midAdvAway = 1 - midAdvHome;
@@ -386,7 +543,6 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
     const attClub = isHome ? home_club : away_club;
     const defClub = isHome ? away_club : home_club;
     const attPlayers = isHome ? home_players : away_players;
-    const defPlayers = isHome ? away_players : home_players;
     const attRating = isHome ? homeAttack : awayAttack;
     const defRating = isHome ? awayDefense : homeDefense;
     const teamXG = isHome ? xgHome : xgAway;
@@ -434,11 +590,9 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
 
     const chosen = eventSlices[chosenIdx];
     const attacker = pickRandom(attPlayers.filter((p) => p.position !== "GK")) ?? attPlayers[0];
-    const defender = pickRandom(defPlayers.filter((p) => p.position !== "GK")) ?? defPlayers[0];
-    const gk = defPlayers.find((p) => p.position === "GK") ?? defPlayers[0];
 
     let isGoal = false;
-    let commentary = "";
+    let stepCommentary = "";
 
     switch (chosen.key) {
       case "GOAL": {
@@ -456,7 +610,7 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
         }
         const scorerName = attPlayers.find((p) => p.id === gEvt.scorer_id)?.name || attacker.name || "Pemain";
         const assistName = gEvt.assist_id ? attPlayers.find((p) => p.id === gEvt.assist_id)?.name : null;
-        commentary = `GOL! ${scorerName} mencetak gol untuk ${attClub.name}${assistName ? ` (Assist: ${assistName})` : ""}! Skor ${homeGoals}–${awayGoals}.`;
+        stepCommentary = `${commentary("goal", attClub.name, scorerName, assistName)} Skor ${homeGoals}–${awayGoals}.`;
         break;
       }
       case "PENALTY": {
@@ -476,9 +630,9 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
             stats.away_shots_on_target++;
           }
           const scorerName = attPlayers.find((p) => p.id === gEvt.scorer_id)?.name || attacker.name || "Algojo";
-          commentary = `PENALTI GOL! ${scorerName} mengeksekusi penalti dengan dingin untuk ${attClub.name}! Skor ${homeGoals}–${awayGoals}.`;
+          stepCommentary = `PENALTI! ${commentary("goal", attClub.name, scorerName)} Skor ${homeGoals}–${awayGoals}.`;
         } else {
-          commentary = `PENALTI GAGAL! Tendangan penalti ${attacker.name || attClub.name} berhasil ditepis ${gk.name || "kiper"}!`;
+          stepCommentary = `PENALTI GAGAL! ${commentary("chance_saved", attClub.name)}`;
         }
         break;
       }
@@ -490,25 +644,25 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
           stats.away_shots++;
           stats.away_shots_on_target++;
         }
-        commentary = `Tembakan keras ${attacker.name || attClub.name} berhasil ditepis dengan gemilang oleh ${gk.name || "kiper"} (${defClub.name}).`;
+        stepCommentary = commentary("chance_saved", attClub.name);
         break;
       }
       case "WOODWORK": {
         if (isHome) stats.home_shots++;
         else stats.away_shots++;
-        commentary = `TIANG GAWANG! Sepakan ${attacker.name || attClub.name} membentur mistar gawang ${defClub.name}!`;
+        stepCommentary = commentary("chance_missed", attClub.name);
         break;
       }
       case "CORNER": {
         if (isHome) stats.home_corners++;
         else stats.away_corners++;
-        commentary = `${attClub.name} menekan dan mendapatkan sepak pojok setelah bola diblok ${defender.name || "bek"}.`;
+        stepCommentary = commentary("chance_missed", attClub.name);
         break;
       }
       case "FREEKICK": {
         if (isHome) stats.home_shots++;
         else stats.away_shots++;
-        commentary = `Tendangan bebas berbahaya dari ${attacker.name || attClub.name} masih tipis di atas mistar ${defClub.name}.`;
+        stepCommentary = commentary("chance_missed", attClub.name);
         break;
       }
       case "FOUL": {
@@ -516,31 +670,28 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
         if (cardRoll < 0.04) {
           if (isHome) stats.away_red_cards++;
           else stats.home_red_cards++;
-          commentary = `KARTU MERAH! Tekel keras ${defender.name || defClub.name} terhadap ${attacker.name || attClub.name} berujung pengusiran!`;
+          stepCommentary = commentary("red_card", defClub.name);
         } else if (cardRoll < 0.38) {
           if (isHome) stats.away_yellow_cards++;
           else stats.home_yellow_cards++;
-          commentary = `Kartu kuning untuk ${defender.name || defClub.name} usai melanggar ${attacker.name || attClub.name}.`;
+          stepCommentary = commentary("yellow_card", defClub.name);
         } else {
-          commentary = `Pelanggaran oleh ${defender.name || defClub.name} saat menghentikan pergerakan ${attacker.name || attClub.name}.`;
+          stepCommentary = commentary("foul", defClub.name);
         }
         break;
       }
       case "COUNTER": {
-        commentary = `Serangan balik cepat ${defClub.name} mematahkan momentum serangan ${attClub.name}.`;
+        stepCommentary = commentary("quiet", defClub.name);
         break;
       }
       case "OUT": {
         if (isHome) stats.home_shots++;
         else stats.away_shots++;
-        commentary =
-          Math.random() < 0.5
-            ? `Peluang ${attacker.name || attClub.name} masih melebar di sisi gawang ${defClub.name}.`
-            : `Hakim garis mengangkat bendera — ${attacker.name || attClub.name} terjebak offside.`;
+        stepCommentary = commentary("chance_missed", attClub.name);
         break;
       }
       default: {
-        commentary = `Pertahanan rapat! ${defender.name || defClub.name} memotong umpan terobosan ${attClub.name}.`;
+        stepCommentary = commentary("tackle", defClub.name);
         break;
       }
     }
@@ -557,7 +708,7 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
       is_goal: isGoal,
       home_goals: homeGoals,
       away_goals: awayGoals,
-      commentary,
+      commentary: stepCommentary,
     });
   }
 

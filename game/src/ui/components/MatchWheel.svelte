@@ -1,21 +1,37 @@
 <script lang="ts">
-  import type { MatchStep, WheelSlice } from "../../engine/match.js";
+  import type { MatchStep, WheelSlice, TacticalMentality } from "../../engine/match.js";
 
   interface Props {
     steps: MatchStep[];
     homeName: string;
     awayName: string;
+    canIntervene?: boolean;
+    userClubName?: string;
+    onfinish?: (finalHomeGoals: number, finalAwayGoals: number) => void;
     onclose: () => void;
   }
 
-  let { steps, homeName, awayName, onclose }: Props = $props();
+  let {
+    steps,
+    homeName,
+    awayName,
+    canIntervene = false,
+    userClubName = "",
+    onfinish,
+    onclose,
+  }: Props = $props();
 
+  let stepOverrides = $state<MatchStep[] | null>(null);
+  const activeSteps = $derived(stepOverrides ?? steps);
   let stepIdx = $state(0);
   let autoPlay = $state(false);
   let spinCount = $state(1);
+  let liveMentality = $state<TacticalMentality>("balanced");
+  let subsLeft = $state(3);
+  let subBoost = $state(0); // +1 per substitution made
 
-  const current = $derived(steps[stepIdx] ?? null);
-  const isFinished = $derived(stepIdx >= steps.length - 1);
+  const current = $derived(activeSteps[stepIdx] ?? null);
+  const isFinished = $derived(stepIdx >= activeSteps.length - 1);
 
   // Auto-advance timer when autoPlay is active
   $effect(() => {
@@ -24,7 +40,7 @@
       return;
     }
     const id = setInterval(() => {
-      if (stepIdx < steps.length - 1) {
+      if (stepIdx < activeSteps.length - 1) {
         stepIdx++;
         spinCount++;
       } else {
@@ -34,8 +50,113 @@
     return () => clearInterval(id);
   });
 
+  function recalculateRemainingSteps(note: string) {
+    if (isFinished || !current) return;
+    const isUserHome = userClubName === homeName;
+    const nextSteps = activeSteps.map((s) => ({
+      ...s,
+      team_slices: [{ ...s.team_slices[0] }, { ...s.team_slices[1] }] as [WheelSlice, WheelSlice],
+      event_slices: s.event_slices.map((e) => ({ ...e })),
+    }));
+
+    nextSteps[stepIdx].commentary = `${nextSteps[stepIdx].commentary} ${note}`;
+
+    let runningHG = nextSteps[stepIdx].home_goals;
+    let runningAG = nextSteps[stepIdx].away_goals;
+
+    const mentalityShift = liveMentality === "attacking" ? 8 : liveMentality === "defensive" ? -8 : 0;
+    const totalUserShift = mentalityShift + subBoost * 4;
+
+    for (let i = stepIdx + 1; i < nextSteps.length; i++) {
+      const st = nextSteps[i];
+      const baseHomePct = st.team_slices[0].weight;
+      const newHomePct = Math.max(
+        15,
+        Math.min(85, baseHomePct + (isUserHome ? totalUserShift : -totalUserShift)),
+      );
+      st.team_slices[0].weight = newHomePct;
+      st.team_slices[1].weight = 100 - newHomePct;
+
+      const userAttacking = st.attacking_club_name === userClubName;
+      for (const sl of st.event_slices) {
+        if (userAttacking) {
+          if (sl.key === "GOAL") {
+            const mult =
+              (liveMentality === "attacking" ? 1.35 : liveMentality === "defensive" ? 0.78 : 1.0) *
+              (1 + subBoost * 0.12);
+            sl.weight = Math.max(1, Math.round(sl.weight * mult));
+          }
+        } else {
+          if (sl.key === "DEFENSE" || sl.key === "SAVE") {
+            const mult =
+              (liveMentality === "defensive" ? 1.4 : liveMentality === "attacking" ? 0.85 : 1.0) *
+              (1 + subBoost * 0.08);
+            sl.weight = Math.max(1, Math.round(sl.weight * mult));
+          }
+        }
+      }
+
+      // Normalize event_slices weights to ~100 and re-spin
+      const sumW = st.event_slices.reduce((acc, x) => acc + x.weight, 0) || 100;
+      for (const sl of st.event_slices) {
+        sl.weight = Math.max(1, Math.round((sl.weight / sumW) * 100));
+      }
+      const normSum = st.event_slices.reduce((acc, x) => acc + x.weight, 0);
+      let r = Math.random() * normSum;
+      let chosenIdx = 0;
+      for (let j = 0; j < st.event_slices.length; j++) {
+        r -= st.event_slices[j].weight;
+        if (r <= 0) {
+          chosenIdx = j;
+          break;
+        }
+      }
+      const chosen = st.event_slices[chosenIdx];
+      st.chosen_index = chosenIdx;
+      st.outcome_key = chosen.key;
+      st.outcome_label = chosen.label;
+
+      const attIsHome = st.attacking_club_name === homeName;
+      if (chosen.key === "GOAL" || (chosen.key === "PENALTY" && Math.random() < 0.78)) {
+        st.is_goal = true;
+        if (attIsHome) runningHG++;
+        else runningAG++;
+        st.commentary = `GOL! Momentum taktik membuahkan gol bagi ${st.attacking_club_name}! Skor ${runningHG}–${runningAG}.`;
+      } else {
+        st.is_goal = false;
+        if (chosen.key === "SAVE") {
+          st.commentary = `Tepis gemilang kiper menggagalkan peluang ${st.attacking_club_name}.`;
+        } else if (chosen.key === "DEFENSE") {
+          st.commentary = `Barisan pertahanan disiplin mematahkan serangan ${st.attacking_club_name}.`;
+        } else if (chosen.key === "COUNTER") {
+          st.commentary = `Serangan balik cepat mematahkan tekanan ${st.attacking_club_name}.`;
+        } else {
+          st.commentary = `${st.attacking_club_name} mendapat hasil ${chosen.label} di menit ${st.minute}'.`;
+        }
+      }
+      st.home_goals = runningHG;
+      st.away_goals = runningAG;
+    }
+
+    stepOverrides = nextSteps;
+  }
+
+  function changeMentality(m: TacticalMentality) {
+    if (liveMentality === m || isFinished) return;
+    liveMentality = m;
+    const label = m === "attacking" ? "All-Out Attack" : m === "defensive" ? "Parkir Bus" : "Seimbang";
+    recalculateRemainingSteps(`[📋 Instruksi Manajer: Taktik diubah ke ${label}!]`);
+  }
+
+  function makeSubstitution() {
+    if (subsLeft <= 0 || isFinished) return;
+    subsLeft--;
+    subBoost++;
+    recalculateRemainingSteps(`[🔄 Substitusi Manajer (${3 - subsLeft}/3): Pemain segar masuk menambah daya dobrak!]`);
+  }
+
   function nextStep() {
-    if (stepIdx < steps.length - 1) {
+    if (stepIdx < activeSteps.length - 1) {
       stepIdx++;
       spinCount++;
     }
@@ -43,8 +164,16 @@
 
   function skipToEnd() {
     autoPlay = false;
-    stepIdx = steps.length - 1;
+    stepIdx = activeSteps.length - 1;
     spinCount++;
+  }
+
+  function finishMatch() {
+    const last = activeSteps[activeSteps.length - 1];
+    if (last && onfinish) {
+      onfinish(last.home_goals, last.away_goals);
+    }
+    onclose();
   }
 
   // Build CSS conic-gradient string from slices
@@ -73,7 +202,7 @@
     return spinCount * 360 + (360 - sliceAngle);
   });
 
-  const visibleLog = $derived(steps.slice(0, stepIdx + 1).reverse());
+  const visibleLog = $derived(activeSteps.slice(0, stepIdx + 1).reverse());
 </script>
 
 <div class="wheel-modal">
@@ -137,17 +266,47 @@
     </section>
   {/if}
 
+  {#if canIntervene && !isFinished}
+    <section class="intervene-bar">
+      <div class="int-group">
+        <span class="int-title">🎯 Intervensi Taktik Live ({userClubName}):</span>
+        <button
+          class="int-btn"
+          class:active={liveMentality === "attacking"}
+          onclick={() => changeMentality("attacking")}
+        >⚔️ All-Out Attack</button>
+        <button
+          class="int-btn"
+          class:active={liveMentality === "balanced"}
+          onclick={() => changeMentality("balanced")}
+        >⚖️ Seimbang</button>
+        <button
+          class="int-btn"
+          class:active={liveMentality === "defensive"}
+          onclick={() => changeMentality("defensive")}
+        >🛡️ Parkir Bus</button>
+      </div>
+      <button
+        class="sub-btn"
+        disabled={subsLeft <= 0}
+        onclick={makeSubstitution}
+      >
+        🔄 Substitusi Pemain Segar ({subsLeft}/3)
+      </button>
+    </section>
+  {/if}
+
   <!-- Controls -->
   <section class="controls">
     {#if !isFinished}
-      <button onclick={nextStep} disabled={autoPlay}>⏭ Step ({stepIdx + 1}/{steps.length})</button>
+      <button onclick={nextStep} disabled={autoPlay}>⏭ Step ({stepIdx + 1}/{activeSteps.length})</button>
       <button onclick={() => (autoPlay = !autoPlay)}>
         {autoPlay ? "⏸ Pause" : "▶ Auto Play"}
       </button>
       <button onclick={skipToEnd}>⏩ Lewati ke 90'</button>
     {:else}
       <button onclick={() => { stepIdx = 0; spinCount = 1; autoPlay = false; }}>🔄 Putar Ulang</button>
-      <button class="done-btn" onclick={onclose}>✓ Selesai Pertandingan</button>
+      <button class="done-btn" onclick={finishMatch}>✓ Selesai Pertandingan</button>
     {/if}
   </section>
 
@@ -283,6 +442,43 @@
   .swatch { width: 10px; height: 10px; display: inline-block; flex-shrink: 0; border-radius: 2px; }
   .s-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .s-pct { color: var(--text2); font-weight: bold; min-width: 28px; text-align: right; }
+
+  .intervene-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+  }
+  .int-group { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+  .int-title { font-size: 0.74rem; color: var(--amber); font-weight: bold; margin-right: 0.2rem; }
+  .int-btn {
+    padding: 0.28rem 0.6rem;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--text2);
+    font-family: inherit;
+    font-size: 0.73rem;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .int-btn.active { border-color: var(--green); background: var(--green-bg); color: var(--green); font-weight: bold; }
+  .sub-btn {
+    padding: 0.3rem 0.7rem;
+    background: transparent;
+    border: 1px solid var(--blue);
+    color: var(--blue);
+    font-family: inherit;
+    font-size: 0.74rem;
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  .sub-btn:hover:not(:disabled) { background: rgba(96,165,250,0.12); }
+  .sub-btn:disabled { opacity: 0.35; cursor: default; }
 
   .controls { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .controls button {

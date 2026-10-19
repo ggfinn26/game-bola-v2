@@ -5,7 +5,10 @@ let db: Database | null = null;
 export async function initDB(): Promise<Database> {
   const { default: initSqlJs } = await import("sql.js");
   const SQL = await initSqlJs({
-    locateFile: (file: string) => `/sql.js/${file}`,
+    locateFile: (file: string) =>
+      typeof window === "undefined"
+        ? new URL(`../../node_modules/sql.js/dist/${file}`, import.meta.url).pathname
+        : `/sql.js/${file}`,
   });
   db = new SQL.Database();
   createSchema(db);
@@ -24,7 +27,12 @@ export function exportDB(): Uint8Array {
 
 export async function loadDB(data: Uint8Array): Promise<void> {
   const { default: initSqlJs } = await import("sql.js");
-  const SQL = await initSqlJs({ locateFile: (f: string) => `/sql.js/${f}` });
+  const SQL = await initSqlJs({
+    locateFile: (file: string) =>
+      typeof window === "undefined"
+        ? new URL(`../../node_modules/sql.js/dist/${file}`, import.meta.url).pathname
+        : `/sql.js/${file}`,
+  });
   db = new SQL.Database(data);
   createSchema(db);
 }
@@ -160,7 +168,17 @@ function createSchema(db: Database): void {
       continent TEXT,
       format TEXT DEFAULT 'league',
       slots INTEGER DEFAULT 18,
-      active_config_id INTEGER   -- FK → competition_configs.id
+      active_config_id INTEGER,  -- FK → competition_configs.id
+      type TEXT DEFAULT 'pro'    -- 'pro' | 'tarkan'
+    );
+
+    -- One enrollment per player per season; leaving = DELETE row
+    CREATE TABLE IF NOT EXISTS tarkan_enrollment (
+      player_id INTEGER NOT NULL,
+      league_id INTEGER NOT NULL,
+      club_id INTEGER NOT NULL,
+      season INTEGER NOT NULL,
+      PRIMARY KEY(player_id, season)
     );
 
     CREATE TABLE IF NOT EXISTS league_slots (

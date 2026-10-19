@@ -30,15 +30,20 @@ These are finalized. Do not suggest alternatives unless explicitly asked.
 ```
 id, name, nationality, club, position, secondary_position
 age, height, weight, foot
-ca, pa, overall
-attacking, defending, technical, mental, physical, speed, goalkeeping
-stamina, form, injury_prone
-traits (JSON array, max 5)
+ca, pa, pa_ceiling, overall
+finishing, passing, dribbling, heading, crossing, tackling, technique, long_shots
+decisions, composure, positioning, vision, anticipation, off_the_ball, work_rate
+pace, strength, agility, jumping, stamina
+reflexes, handling, gk_positioning, one_on_ones, command
+form, injury_prone
+traits (JSON array, max 5), trait_intensity
 injured, injury_duration, injury_type
+in_prison, prison_duration
 retired, free_agent, on_transfer_list, transfer_ban
-matches, goals, assists, rating
+matches, goals, assists, clean_sheets, rating
 yellow_cards, red_cards
-club_loyalty, agent_id
+career_matches, career_goals, career_assists, career_trophies
+club_loyalty, agent_id, contract_end, wage
 ```
 
 ### Positions
@@ -80,14 +85,14 @@ professional, lazy, hot_headed, composed, temperamental,
 ambitious, content, extrovert, introvert,
 media_friendly, controversial, greedy, generous,
 loyal, mercenary, determination, fragile_mentally,
-leader, disruptive, quick_learner, late_bloomer,
+leader, disruptive, quick_learner, late_bloomer, wonderkid,
 natural_fitness, injury_magnet, risk_taker, clean_cut
 ```
 
 Mutually exclusive pairs: professional/lazy, hot_headed/composed, ambitious/content,
 extrovert/introvert, media_friendly/controversial, greedy/generous, loyal/mercenary,
-determination/fragile_mentally, leader/disruptive, natural_fitness/injury_magnet,
-risk_taker/clean_cut
+determination/fragile_mentally, leader/disruptive, wonderkid/late_bloomer,
+natural_fitness/injury_magnet, risk_taker/clean_cut
 
 ## Injury Types (severity tiers)
 

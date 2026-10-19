@@ -52,9 +52,8 @@ export function getActiveStages(leagueId: number): StageConfig[] {
   return [{ ...DEFAULT_REGULAR_STAGE }];
 }
 
-export function setChampionshipSeriesFormat(leagueId: number, enable: boolean): string {
-  const db = getDB();
-  const stages: StageConfig[] = enable
+export function buildStagesPreset(enableChampionshipSeries: boolean): StageConfig[] {
+  return enableChampionshipSeries
     ? [
         {
           id: "regular_season",
@@ -104,6 +103,11 @@ export function setChampionshipSeriesFormat(leagueId: number, enable: boolean): 
           tiebreakers: ["goal_diff", "goals_for", "h2h"],
         },
       ];
+}
+
+export function setChampionshipSeriesFormat(leagueId: number, enable: boolean): string {
+  const db = getDB();
+  const stages = buildStagesPreset(enable);
 
   db.run(
     `UPDATE competition_configs SET stages = ? WHERE league_id = ? AND status = 'active'`,
@@ -118,6 +122,344 @@ export function setChampionshipSeriesFormat(leagueId: number, enable: boolean): 
 export function hasChampionshipSeries(leagueId: number): boolean {
   const stages = getActiveStages(leagueId);
   return stages.some((s) => s.type === "knockout" || s.format === "knockout");
+}
+
+// ─── Format Proposals & Voting (Kongres Liga) ─────────────────────────────────
+
+export interface FormatProposalView {
+  id: number;
+  league_id: number;
+  proposed_by: number;
+  proposer_name: string;
+  proposer_type: "club_owner" | "federation";
+  season_apply: number;
+  enable_championship: boolean;
+  votes_for: number;
+  votes_against: number;
+  votes_abstain: number;
+  total_clubs: number;
+  threshold: number;
+  status: "open" | "passed" | "rejected" | "withdrawn";
+  created_day: number;
+  deadline_day: number;
+  user_vote: "for" | "against" | "abstain" | null;
+}
+
+function stagesHaveKnockout(stagesJson: string): boolean {
+  try {
+    const parsed = JSON.parse(stagesJson) as StageConfig[];
+    return Array.isArray(parsed) && parsed.some((s) => s.type === "knockout" || s.format === "knockout");
+  } catch {
+    return false;
+  }
+}
+
+function decideNpcClubVote(rank: number, enableChamp: boolean): "for" | "against" | "abstain" {
+  const r = Math.random();
+  if (enableChamp) {
+    // Rank 2-8 love playoff chance & extra gate receipts; Rank 1 prefers straight league table
+    if (rank === 1) return r < 0.7 ? "against" : r < 0.9 ? "for" : "abstain";
+    if (rank >= 2 && rank <= 8) return r < 0.78 ? "for" : r < 0.93 ? "against" : "abstain";
+    return r < 0.58 ? "for" : r < 0.88 ? "against" : "abstain";
+  } else {
+    // Switching back to full league without playoffs
+    if (rank === 1 || rank > 10) return r < 0.68 ? "for" : r < 0.9 ? "against" : "abstain";
+    if (rank >= 2 && rank <= 6) return r < 0.35 ? "for" : r < 0.9 ? "against" : "abstain";
+    return r < 0.55 ? "for" : r < 0.88 ? "against" : "abstain";
+  }
+}
+
+function refreshProposalCounts(proposalId: number): { forCount: number; againstCount: number; abstainCount: number } {
+  const db = getDB();
+  const rows =
+    db.exec(`SELECT vote, COUNT(*) FROM format_votes WHERE proposal_id = ? GROUP BY vote`, [proposalId])[0]?.values ??
+    [];
+  let forCount = 0;
+  let againstCount = 0;
+  let abstainCount = 0;
+  for (const r of rows) {
+    const v = r[0] as string;
+    const c = r[1] as number;
+    if (v === "for") forCount = c;
+    else if (v === "against") againstCount = c;
+    else abstainCount = c;
+  }
+  db.run(`UPDATE format_proposals SET votes_for = ?, votes_against = ?, votes_abstain = ? WHERE id = ?`, [
+    forCount,
+    againstCount,
+    abstainCount,
+    proposalId,
+  ]);
+  return { forCount, againstCount, abstainCount };
+}
+
+export function getFormatProposalState(leagueId: number, voterId = 0): FormatProposalView | null {
+  const db = getDB();
+  const res = db.exec(
+    `SELECT id, league_id, proposed_by, proposer_type, season_apply, proposed_stages,
+            votes_for, votes_against, votes_abstain, threshold, status, created_day, deadline_day
+     FROM format_proposals
+     WHERE league_id = ?
+     ORDER BY (status = 'open') DESC, id DESC LIMIT 1`,
+    [leagueId],
+  );
+  const row = res[0]?.values[0];
+  if (!row) return null;
+
+  const proposalId = row[0] as number;
+  const proposedBy = row[2] as number;
+  const proposerType = (row[3] as "club_owner" | "federation") ?? "federation";
+  let proposerName = "Federasi (PSSI / LIB)";
+  if (proposerType === "club_owner" && proposedBy > 0) {
+    const cName = db.exec(`SELECT name FROM clubs WHERE id = ?`, [proposedBy])[0]?.values[0]?.[0] as string | undefined;
+    if (cName) proposerName = cName;
+  }
+
+  const totalClubs =
+    (db.exec(`SELECT COUNT(*) FROM clubs WHERE league_id = ?`, [leagueId])[0]?.values[0]?.[0] as number) ?? 18;
+
+  const effectiveVoterId = voterId > 0 ? voterId : 999;
+  const uvRes = db.exec(`SELECT vote FROM format_votes WHERE proposal_id = ? AND voter_id = ?`, [
+    proposalId,
+    effectiveVoterId,
+  ]);
+  const userVote = (uvRes[0]?.values[0]?.[0] as "for" | "against" | "abstain" | undefined) ?? null;
+
+  return {
+    id: proposalId,
+    league_id: row[1] as number,
+    proposed_by: proposedBy,
+    proposer_name: proposerName,
+    proposer_type: proposerType,
+    season_apply: row[4] as number,
+    enable_championship: stagesHaveKnockout(row[5] as string),
+    votes_for: row[6] as number,
+    votes_against: row[7] as number,
+    votes_abstain: row[8] as number,
+    total_clubs: totalClubs,
+    threshold: row[9] as number,
+    status: row[10] as FormatProposalView["status"],
+    created_day: row[11] as number,
+    deadline_day: row[12] as number,
+    user_vote: userVote,
+  };
+}
+
+export function proposeFormatChange(
+  leagueId: number,
+  proposerClubId: number,
+  proposerType: "club_owner" | "federation",
+  currentDay: number,
+  currentSeason: number,
+): { proposal: FormatProposalView | null; summary: string } {
+  const db = getDB();
+  const existingOpen = db.exec(`SELECT id FROM format_proposals WHERE league_id = ? AND status = 'open' LIMIT 1`, [
+    leagueId,
+  ])[0]?.values[0];
+  if (existingOpen) {
+    return {
+      proposal: getFormatProposalState(leagueId, proposerClubId),
+      summary: "🗳️ Proposal perubahan format liga sedang dalam masa pemungutan suara Kongres.",
+    };
+  }
+
+  const targetEnable = !hasChampionshipSeries(leagueId);
+  const stagesJson = JSON.stringify(buildStagesPreset(targetEnable));
+
+  const cfgRow = db.exec(
+    `SELECT foreign_rules, card_rules FROM competition_configs WHERE league_id = ? AND status = 'active' LIMIT 1`,
+    [leagueId],
+  )[0]?.values[0];
+  const foreignRules = (cfgRow?.[0] as string) ?? "{}";
+  const cardRules = (cfgRow?.[1] as string) ?? "{}";
+
+  const nextId =
+    ((db.exec(`SELECT COALESCE(MAX(id), 0) FROM format_proposals`)[0]?.values[0]?.[0] as number) ?? 0) + 1;
+  const deadlineDay = currentDay + 14;
+
+  db.run(
+    `INSERT INTO format_proposals
+      (id, league_id, proposed_by, proposer_type, season_apply, proposed_stages, proposed_foreign_rules, proposed_card_rules,
+       votes_for, votes_against, votes_abstain, threshold, status, created_day, deadline_day)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0.51, 'open', ?, ?)`,
+    [
+      nextId,
+      leagueId,
+      proposerClubId,
+      proposerType,
+      currentSeason,
+      stagesJson,
+      foreignRules,
+      cardRules,
+      currentDay,
+      deadlineDay,
+    ],
+  );
+
+  // Cast initial early votes from ~8 NPC clubs so the Congress board shows live momentum
+  const clubsOrdered =
+    (db.exec(
+      `SELECT id FROM clubs WHERE league_id = ? ORDER BY points DESC, (goals_for - goals_against) DESC`,
+      [leagueId],
+    )[0]?.values as [number][] | undefined) ?? [];
+
+  let earlyVotesCast = 0;
+  for (let i = 0; i < clubsOrdered.length; i++) {
+    const cid = clubsOrdered[i][0];
+    if (cid === proposerClubId) continue;
+    if (earlyVotesCast >= 8) break;
+    const vote = decideNpcClubVote(i + 1, targetEnable);
+    db.run(
+      `INSERT OR REPLACE INTO format_votes (proposal_id, voter_id, voter_type, vote, voted_day)
+       VALUES (?, ?, 'club_owner', ?, ?)`,
+      [nextId, cid, vote, currentDay],
+    );
+    earlyVotesCast++;
+  }
+
+  refreshProposalCounts(nextId);
+  const label = targetEnable ? "Championship Series (4 Besar)" : "Liga Penuh (Tanpa Knockout)";
+  return {
+    proposal: getFormatProposalState(leagueId, proposerClubId),
+    summary: `📜 Proposal Kongres diajukan: Ubah ke ${label}. Pemungutan suara 18 klub dibuka (batas Hari ${deadlineDay})!`,
+  };
+}
+
+function finalizeProposalInternal(proposalId: number, currentDay: number, userVoterId: number): string {
+  const db = getDB();
+  const pRow = db.exec(
+    `SELECT league_id, proposed_stages, threshold, status FROM format_proposals WHERE id = ?`,
+    [proposalId],
+  )[0]?.values[0];
+  if (!pRow || pRow[3] !== "open") return "";
+
+  const leagueId = pRow[0] as number;
+  const stagesJson = pRow[1] as string;
+  const threshold = (pRow[2] as number) ?? 0.51;
+  const targetEnable = stagesHaveKnockout(stagesJson);
+
+  // Cast remaining NPC club votes
+  const clubsOrdered =
+    (db.exec(
+      `SELECT id FROM clubs WHERE league_id = ? ORDER BY points DESC, (goals_for - goals_against) DESC`,
+      [leagueId],
+    )[0]?.values as [number][] | undefined) ?? [];
+
+  const votedIds = new Set<number>(
+    (
+      db.exec(`SELECT voter_id FROM format_votes WHERE proposal_id = ?`, [proposalId])[0]?.values ?? []
+    ).map((r) => r[0] as number),
+  );
+
+  for (let i = 0; i < clubsOrdered.length; i++) {
+    const cid = clubsOrdered[i][0];
+    if (votedIds.has(cid) || cid === userVoterId) continue;
+    const vote = decideNpcClubVote(i + 1, targetEnable);
+    db.run(
+      `INSERT OR REPLACE INTO format_votes (proposal_id, voter_id, voter_type, vote, voted_day)
+       VALUES (?, ?, 'club_owner', ?, ?)`,
+      [proposalId, cid, vote, currentDay],
+    );
+  }
+
+  const { forCount, againstCount, abstainCount } = refreshProposalCounts(proposalId);
+  const decisiveTotal = Math.max(1, forCount + againstCount);
+  const ratio = forCount / decisiveTotal;
+  const passed = ratio >= threshold;
+  const newStatus = passed ? "passed" : "rejected";
+
+  db.run(`UPDATE format_proposals SET status = ? WHERE id = ?`, [newStatus, proposalId]);
+
+  const formatName = targetEnable ? "Championship Series (4 Besar)" : "Liga Penuh (Regular Season)";
+  if (passed) {
+    setChampionshipSeriesFormat(leagueId, targetEnable);
+    return `🏛️ KONGRES LIGA SAH: Proposal ${formatName} DISETUJUI (${forCount} Setuju, ${againstCount} Tolak, ${abstainCount} Abstain)! Format aktif sekarang.`;
+  }
+  return `🏛️ KONGRES LIGA: Proposal ${formatName} DITOLAK (${forCount} Setuju, ${againstCount} Tolak, ${abstainCount} Abstain). Format tidak berubah.`;
+}
+
+export function voteOnFormatProposal(
+  proposalId: number,
+  voterClubId: number,
+  voterType: "club_owner" | "federation_member",
+  choice: "for" | "against" | "abstain",
+  currentDay: number,
+): { proposal: FormatProposalView | null; championship_series: boolean; summary: string } {
+  const db = getDB();
+  const effectiveVoterId = voterClubId > 0 ? voterClubId : 999;
+
+  const pRow = db.exec(`SELECT league_id, status FROM format_proposals WHERE id = ?`, [proposalId])[0]?.values[0];
+  if (!pRow) {
+    return {
+      proposal: null,
+      championship_series: hasChampionshipSeries(1),
+      summary: "Proposal tidak ditemukan.",
+    };
+  }
+  const leagueId = pRow[0] as number;
+  if (pRow[1] !== "open") {
+    return {
+      proposal: getFormatProposalState(leagueId, voterClubId),
+      championship_series: hasChampionshipSeries(leagueId),
+      summary: "Pemungutan suara proposal ini sudah ditutup.",
+    };
+  }
+
+  db.run(
+    `INSERT OR REPLACE INTO format_votes (proposal_id, voter_id, voter_type, vote, voted_day)
+     VALUES (?, ?, ?, ?, ?)`,
+    [proposalId, effectiveVoterId, voterType, choice, currentDay],
+  );
+
+  const summary = finalizeProposalInternal(proposalId, currentDay, effectiveVoterId);
+  return {
+    proposal: getFormatProposalState(leagueId, voterClubId),
+    championship_series: hasChampionshipSeries(leagueId),
+    summary,
+  };
+}
+
+export function tickFormatProposals(
+  leagueId: number,
+  currentDay: number,
+  currentSeason: number,
+  userClubId = 0,
+): string | null {
+  const db = getDB();
+  // 1. Check if any open proposal reached its deadline_day
+  const openRow = db.exec(
+    `SELECT id, deadline_day FROM format_proposals WHERE league_id = ? AND status = 'open' LIMIT 1`,
+    [leagueId],
+  )[0]?.values[0];
+
+  if (openRow) {
+    const propId = openRow[0] as number;
+    const deadline = openRow[1] as number;
+    if (currentDay >= deadline) {
+      return finalizeProposalInternal(propId, currentDay, userClubId);
+    }
+    return null;
+  }
+
+  // 2. Mid-season Federation/NPC club initiative: if no proposal yet this season and around day 85-130 of season
+  const dayInSeason = currentDay % 365;
+  if (dayInSeason >= 85 && dayInSeason <= 130 && Math.random() < 0.2) {
+    const countThisSeason =
+      (db.exec(`SELECT COUNT(*) FROM format_proposals WHERE league_id = ? AND season_apply = ?`, [
+        leagueId,
+        currentSeason,
+      ])[0]?.values[0]?.[0] as number) ?? 0;
+    if (countThisSeason === 0) {
+      const npcClubRes = db.exec(
+        `SELECT id FROM clubs WHERE league_id = ? AND id != ? ORDER BY reputation DESC LIMIT 5`,
+        [leagueId, userClubId],
+      )[0]?.values;
+      const npcProposerId = (npcClubRes?.[Math.floor(Math.random() * (npcClubRes?.length || 1))]?.[0] as number) ?? 0;
+      const res = proposeFormatChange(leagueId, npcProposerId, "club_owner", currentDay, currentSeason);
+      return res.summary;
+    }
+  }
+  return null;
 }
 
 function roundRobin(teams: number[]): [number, number][][] {

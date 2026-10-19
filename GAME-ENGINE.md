@@ -10,32 +10,58 @@
 
 ### 1.1 Hitung Rating per Zona
 
-Pisah 11 pemain ke tiga zona. Tiap pemain berkontribusi ke zona utamanya.
+Pisah 11 pemain ke tiga zona (`attack`: ST, LW, RW, AM; `mid`: CM, DM; `defense`: CB, LB, RB, GK). Skor kontribusi tiap pemain dihitung per posisi menggunakan atribut v3 (skala 1–100):
 
-| Zona     | Posisi         | Atribut utama | Atribut sekunder      |
-| -------- | -------------- | ------------- | --------------------- |
-| Attack   | ST, LW, RW, AM | `attacking`   | `technical`, `speed`  |
-| Midfield | CM, DM         | `technical`   | `mental`, `defending` |
-| Defense  | CB, LB, RB, GK | `defending`   | `physical`, `mental`  |
+**Attack (`playerAttackContrib`):**
 
 ```
-attack_rating   = mean(p.attacking  for p in attack_zone)  * 0.6
-                  + mean(p.technical  for p in attack_zone)  * 0.3
-                  + mean(p.speed      for p in attack_zone)  * 0.1
+ST:
+  finishing × 0.35 + heading × 0.15 + strength × 0.10
+  + composure × 0.15 + off_the_ball × 0.15 + technique × 0.10
 
-midfield_rating = mean(p.technical  for p in mid_zone)     * 0.5
-                  + mean(p.mental     for p in mid_zone)     * 0.3
-                  + mean(p.defending  for p in mid_zone)     * 0.2
+LW / RW:
+  dribbling × 0.30 + pace × 0.25 + crossing × 0.20
+  + technique × 0.15 + agility × 0.10
 
-defense_rating  = mean(p.defending  for p in defense_zone) * 0.6
-                  + mean(p.physical   for p in defense_zone) * 0.3
-                  + mean(p.mental     for p in defense_zone) * 0.1
+AM:
+  passing × 0.25 + vision × 0.25 + finishing × 0.20
+  + anticipation × 0.15 + decisions × 0.15
 ```
 
-GK formula tersendiri:
+**Midfield (`playerMidfieldContrib`):**
 
 ```
-gk_rating = gk.goalkeeping * 0.7 + gk.physical * 0.2 + gk.mental * 0.1
+CM:
+  passing × 0.25 + vision × 0.20 + decisions × 0.20
+  + work_rate × 0.15 + technique × 0.10 + positioning × 0.10
+
+DM:
+  positioning × 0.25 + decisions × 0.20 + tackling × 0.20
+  + work_rate × 0.15 + strength × 0.10 + anticipation × 0.10
+```
+
+**Defense (`playerDefenseContrib`):**
+
+```
+CB:
+  positioning × 0.25 + heading × 0.20 + tackling × 0.20
+  + strength × 0.15 + anticipation × 0.10 + decisions × 0.10
+
+LB / RB:
+  positioning × 0.20 + pace × 0.20 + tackling × 0.15
+  + crossing × 0.15 + work_rate × 0.15 + strength × 0.15
+
+GK:
+  reflexes × 0.35 + handling × 0.25 + gk_positioning × 0.20
+  + one_on_ones × 0.15 + command × 0.05
+```
+
+**Agregasi Zona:**
+
+```
+attack_rating   = mean(playerZoneScore(p) for p in attack_zone)
+midfield_rating = mean(playerZoneScore(p) for p in mid_zone)
+defense_rating  = (gk_rating + mean(playerZoneScore(p) for p in outfield_defense)) / 2
 ```
 
 ### 1.2 Hitung xG per Tim
@@ -150,8 +176,8 @@ Tiap "serangan" diproses lewat chain berikut:
 ```
 4. JIKA GOAL → GOAL ATTRIBUTION WHEEL
    → Siapa yang cetak gol / assist
-   → slice per pemain = p.attacking × position_weight × p.form
-   → posisi_weight: ST=1.0, LW/RW=0.8, AM=0.6, CM=0.3, lainnya=0.1
+   → slice per pemain = p.finishing × position_weight × p.form × (0.80 + p.composure / 500)
+   → posisi_weight: ST=1.0, LW/RW=0.8, AM=0.6, CM=0.3, lainnya=0.1, GK=0.0
 
 5. JIKA CARD → CARD WHEEL
    → NONE: 60%, YELLOW: 32%, 2ND YELLOW→RED: 5%, RED: 3%
@@ -193,18 +219,18 @@ performance_score = weighted_avg(
   # games_played_ratio = matches_played / total_matches (0–1)
 ```
 
-**Statistik proxy per posisi** (menggunakan field yang tersedia di Player type):
+**Statistik proxy per posisi** (menggunakan field v3 yang tersedia di Player type):
 
 | Posisi | Proxy stats                        | Weight          |
 | ------ | ---------------------------------- | --------------- |
 | GK     | clean_sheets (0–15), rating (0–10) | 50% / 50%       |
-| CB     | defending, physical, mental        | 50% / 30% / 20% |
-| LB, RB | defending, speed, assists          | 40% / 30% / 30% |
-| DM     | technical, defending, mental       | 40% / 35% / 25% |
-| CM     | technical, mental, assists         | 40% / 30% / 30% |
-| AM     | attacking, technical, assists      | 40% / 30% / 30% |
-| LW, RW | attacking, speed, goals            | 50% / 30% / 20% |
-| ST     | attacking, goals, physical         | 60% / 30% / 10% |
+| CB     | positioning, tackling, heading     | 40% / 30% / 30% |
+| LB, RB | positioning, pace, assists         | 35% / 35% / 30% |
+| DM     | positioning, tackling, decisions   | 40% / 35% / 25% |
+| CM     | passing, vision, assists           | 40% / 30% / 30% |
+| AM     | vision, passing, assists           | 35% / 35% / 30% |
+| LW, RW | dribbling, pace, goals             | 40% / 35% / 25% |
+| ST     | finishing, goals, off_the_ball     | 55% / 30% / 15% |
 
 Attribute dinormalisasi ke 0–1 dengan range `[5, 100]`. Goals/assists range `[0, 30]`.
 

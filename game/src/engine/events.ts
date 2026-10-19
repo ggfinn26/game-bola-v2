@@ -27,6 +27,8 @@ const EXCLUSIVE_TRAITS: Partial<Record<Trait, Trait>> = {
   injury_magnet: "natural_fitness",
   risk_taker: "clean_cut",
   clean_cut: "risk_taker",
+  late_bloomer: "wonderkid",
+  wonderkid: "late_bloomer",
 };
 
 export const EVENTS: GameEvent[] = [
@@ -423,7 +425,7 @@ export const EVENTS: GameEvent[] = [
     title: "Pemanggilan Perdana ke Timnas",
     description:
       "Telepon dari staf pelatih Timnas Indonesia tiba: kamu masuk skuad untuk laga kualifikasi. Ini pertama kalinya jersey garuda ada di depan namamu.",
-    condition: { phase: ["pro_step", "rise"] },
+    condition: { phase: ["pro_step", "rise"], requires_overall_min: 55 },
     tone: "positive",
     priority: 5,
     max_occurrences: 1,
@@ -451,7 +453,7 @@ export const EVENTS: GameEvent[] = [
     title: "Gagal Masuk Skuad Timnas",
     description:
       "Pengumuman skuad Timnas keluar — namamu tidak ada di daftar. Padahal performa musim ini terbilang solid. Wartawan mulai menghubungimu.",
-    condition: { phase: ["rise", "prime"] },
+    condition: { phase: ["rise", "prime"], requires_overall_min: 48 },
     tone: "critical",
     priority: 3,
     max_occurrences: 3,
@@ -508,6 +510,34 @@ export const EVENTS: GameEvent[] = [
     ],
   },
 
+  {
+    id: "legal_tax_audit",
+    category: "legal",
+    title: "Tagihan Pajak Tahunan & Tawaran 'Akal-akalan' Akuntan",
+    description:
+      "Akuntan pribadimu menunjukkan tagihan pajak penghasilan musim ini yang cukup besar. Ia menawarkan skema cangkang untuk menyembunyikan bonus tanda tangan kontrakmu.",
+    condition: { phase: ["rise", "prime", "late"] },
+    tone: "critical",
+    priority: 3,
+    max_occurrences: 2,
+    choices: [
+      {
+        id: "pay_taxes_clean",
+        text: "Bayar pajak penuh sesuai aturan, tidur nyenyak",
+        effects: { mental_boost: 1, trait_intensity: { clean_cut: 2, professional: 1 } },
+      },
+      {
+        id: "evade_taxes",
+        text: "Sembunyikan laporan bonus agar potongan pajak minim",
+        effects: {
+          form: -0.04,
+          trait_intensity: { greedy: 2, risk_taker: 2 },
+          legal_case: "tax_evasion",
+        },
+      },
+    ],
+  },
+
   // ─── Endorsement / Business ───────────────────────────────────────────────
 
   {
@@ -516,7 +546,7 @@ export const EVENTS: GameEvent[] = [
     title: "Tawaran Endorse Minuman Energi",
     description:
       "Brand minuman energi terlaris di Indonesia menghubungi agenmu. Mereka ingin wajahmu di papan reklame stadion dan iklan digital. Kontrak setahun.",
-    condition: { phase: ["rise", "prime", "late"] },
+    condition: { phase: ["rise", "prime", "late"], requires_overall_min: 52 },
     tone: "positive",
     priority: 3,
     max_occurrences: 1,
@@ -543,7 +573,7 @@ export const EVENTS: GameEvent[] = [
     title: "Tawaran Endorse Situs Judi Online (Berkedok 'Game')",
     description:
       "Sebuah platform digital menawarkan nominal besar. Namun setelah diteliti agenmu, ternyata itu situs taruhan daring dengan izin abu-abu.",
-    condition: {},
+    condition: { requires_overall_min: 38 },
     tone: "critical",
     priority: 4,
     max_occurrences: 2,
@@ -767,7 +797,7 @@ export const EVENTS: GameEvent[] = [
       {
         id: "stay_for_match",
         text: "Tetap di kota pertandingan atas permintaan ibumu sendiri",
-        effects: { form: 0.04, mental_boost: -1, trait_intensity: { determined: 1 } },
+        effects: { form: 0.04, mental_boost: -1, trait_intensity: { determination: 1 } },
       },
     ],
   },
@@ -900,15 +930,319 @@ export const EVENTS: GameEvent[] = [
       },
     ],
   },
+
+  // ─── Career Milestones (PRD §4.4) ─────────────────────────────────────────
+
+  {
+    id: "milestone_goals_100",
+    category: "milestone",
+    title: "Rekor 100 Gol Karir!",
+    description:
+      "Gol terbarumu resmi menggenapkan koleksi 100 gol sepanjang karir profesional! Stadion berdiri memberikan tepuk tangan panjang dan namamu masuk jajaran penyerang elit.",
+    condition: {},
+    tone: "positive",
+    priority: 5,
+    max_occurrences: 1,
+    social_reactions: [
+      { role: "fan", handle: "@ TribunLegenda", text: "100 GOL! Mesin gol sejati, bangga pernah jadi saksi sejarah!" },
+      { role: "media", handle: "@ StatistikBolaID", text: "Resmi masuk Klub 100 Gol! Konsistensi yang luar biasa." },
+    ],
+    choices: [
+      {
+        id: "dedicate_to_fans",
+        text: "Persembahkan bola pertandingan untuk suporter dan rekan setim",
+        effects: {
+          form: 0.12,
+          mental_boost: 1,
+          reputation: 5,
+          money: 25_000_000,
+          trait_intensity: { loyal: 2, media_friendly: 1 },
+        },
+      },
+      {
+        id: "aim_for_more",
+        text: "Tegaskan di wawancara bahwa 100 gol baru permulaan",
+        effects: {
+          form: 0.1,
+          attack_boost: 1,
+          reputation: 5,
+          money: 25_000_000,
+          trait_intensity: { ambitious: 2, determination: 1 },
+        },
+      },
+    ],
+  },
+
+  {
+    id: "milestone_goals_200",
+    category: "milestone",
+    title: "Legenda Hidup: 200 Gol Karir!",
+    description:
+      "Dua ratus gol! Hanya segelintir pesepakbola dalam sejarah yang mampu mencapai angka keramat ini. Federasi dan klub menyiapkan plakat penghormatan khusus sebelum kick-off.",
+    condition: {},
+    tone: "positive",
+    priority: 5,
+    max_occurrences: 1,
+    social_reactions: [
+      { role: "fan", handle: "@ SejarahSepakbola", text: "200 GOL! Sudah sah jadi legenda abadi sepak bola kita! 🐐" },
+      { role: "critic", handle: "@ AnalisSenior", text: "Ketajaman lintas generasi. Rekor yang sulit dipecahkan." },
+    ],
+    choices: [
+      {
+        id: "humble_legend",
+        text: "Ucapkan terima kasih kepada semua pelatih dan keluarga",
+        effects: {
+          form: 0.15,
+          mental_boost: 2,
+          reputation: 10,
+          money: 50_000_000,
+          trait_intensity: { leader: 2, composed: 1 },
+        },
+      },
+      {
+        id: "iconic_celebration",
+        text: "Rayakan dengan selebrasi ikonik dan rilis jersey edisi terbatas",
+        effects: {
+          form: 0.12,
+          attack_boost: 1,
+          reputation: 12,
+          money: 75_000_000,
+          trait_intensity: { extrovert: 2, media_friendly: 1 },
+        },
+      },
+    ],
+  },
+
+  {
+    id: "milestone_matches_100",
+    category: "milestone",
+    title: "Milestone 100 Penampilan Profesional",
+    description:
+      "Laga pekan ini menandai penampilan ke-100 dalam karir profesionalmu. Dari pemain muda yang gugup hingga kini menjadi sosok yang diperhitungkan di ruang ganti.",
+    condition: {},
+    tone: "positive",
+    priority: 5,
+    max_occurrences: 1,
+    social_reactions: [
+      { role: "media", handle: "@ InfoLigaID", text: "Capai 100 caps profesional! Tonggak penting dalam karirnya." },
+    ],
+    choices: [
+      {
+        id: "celebrate_with_squad",
+        text: "Traktir makan malam skuad sebagai rasa syukur",
+        effects: {
+          form: 0.08,
+          mental_boost: 1,
+          reputation: 3,
+          trait_intensity: { generous: 1, leader: 1 },
+        },
+      },
+      {
+        id: "keep_working_hard",
+        text: "Fokus jaga kebugaran demi ratusan laga berikutnya",
+        effects: {
+          form: 0.08,
+          stamina: 0.08,
+          reputation: 3,
+          trait_intensity: { professional: 2 },
+        },
+      },
+    ],
+  },
+
+  {
+    id: "milestone_matches_200",
+    category: "milestone",
+    title: "200 Laga: Pilar Tak Tergantikan",
+    description:
+      "Dua ratus pertandingan resmi telah kamu lalui. Pengalamanmu membaca permainan dan ketenanganmu di lapangan kini menjadi panutan para pemain muda.",
+    condition: {},
+    tone: "positive",
+    priority: 5,
+    max_occurrences: 1,
+    social_reactions: [
+      { role: "fan", handle: "@ CurvaSudID", text: "200 laga penuh dedikasi! Terima kasih atas keringatmu!" },
+    ],
+    choices: [
+      {
+        id: "mentor_youngsters",
+        text: "Bagikan pengalaman kepada para pemain akademi klub",
+        effects: {
+          form: 0.1,
+          mental_boost: 1,
+          reputation: 5,
+          money: 20_000_000,
+          trait_intensity: { leader: 2, loyal: 1 },
+        },
+      },
+      {
+        id: "maintain_peak",
+        text: "Tingkatkan porsi pemulihan fisik agar tetap di level tertinggi",
+        effects: {
+          form: 0.08,
+          phys_boost: 1,
+          reputation: 5,
+          money: 20_000_000,
+          trait_intensity: { professional: 2, natural_fitness: 1 },
+        },
+      },
+    ],
+  },
+
+  {
+    id: "milestone_matches_300",
+    category: "milestone",
+    title: "300 Penampilan: Sang Veteran Abadi",
+    description:
+      "Tiga ratus laga profesional! Di era sepak bola modern yang keras, bertahan hingga 300 pertandingan adalah bukti mental baja dan disiplin fisik luar biasa.",
+    condition: {},
+    tone: "positive",
+    priority: 5,
+    max_occurrences: 1,
+    social_reactions: [
+      {
+        role: "media",
+        handle: "@ ArsipBolaNasional",
+        text: "300 penampilan! Definisi konsistensi dan profesionalisme sejati.",
+      },
+      { role: "fan", handle: "@ TribunUtara", text: "Respect setinggi-tingginya untuk sang veteran! 👏" },
+    ],
+    choices: [
+      {
+        id: "embrace_veteran_role",
+        text: "Terima ban kehormatan dan pimpin ruang ganti dengan bijak",
+        effects: {
+          form: 0.12,
+          mental_boost: 2,
+          reputation: 8,
+          money: 40_000_000,
+          trait_intensity: { leader: 2, composed: 2 },
+        },
+      },
+      {
+        id: "prove_still_hungry",
+        text: "Buktikan usia hanyalah angka dengan performa eksplosif",
+        effects: {
+          form: 0.12,
+          phys_boost: 1,
+          reputation: 8,
+          money: 40_000_000,
+          trait_intensity: { determination: 2, natural_fitness: 1 },
+        },
+      },
+    ],
+  },
+
+  {
+    id: "milestone_bench_warmer",
+    category: "milestone",
+    title: "Penghangat Bangku Cadangan",
+    description:
+      "Musim terus berjalan namun menit bermainmu sangat minim meski dalam kondisi bugar. Rasa frustrasi mulai muncul setiap kali melihat daftar susunan pemain.",
+    condition: {},
+    tone: "critical",
+    priority: 4,
+    max_occurrences: 2,
+    social_reactions: [
+      { role: "fan", handle: "@ PengamatSkuad", text: "Sayang banget jarang dimainkan, padahal kondisinya fit." },
+      {
+        role: "media",
+        handle: "@ RumorBursaID",
+        text: "Minim menit bermain, masa depannya di klub mulai dipertanyakan.",
+      },
+    ],
+    choices: [
+      {
+        id: "train_harder",
+        text: "Bungkam keraguan dengan kerja keras dua kali lipat di sesi latihan",
+        effects: {
+          form: 0.1,
+          phys_boost: 1,
+          trait_intensity: { professional: 2, determination: 1 },
+        },
+      },
+      {
+        id: "complain_media",
+        text: "Keluhkan keputusan pelatih ke media dan minta masuk daftar transfer",
+        effects: {
+          form: -0.05,
+          trait_intensity: { controversial: 2, ambitious: 1, disruptive: 1 },
+        },
+      },
+    ],
+  },
 ];
 
-// Roll whether an event triggers this week (~40% chance), filtered by career phase & traits
+const MILESTONE_CONDITIONS: Record<string, (p: Player) => boolean> = {
+  milestone_goals_100: (p) => p.career_goals >= 100,
+  milestone_goals_200: (p) => p.career_goals >= 200,
+  milestone_matches_100: (p) => p.career_matches >= 100,
+  milestone_matches_200: (p) => p.career_matches >= 200,
+  milestone_matches_300: (p) => p.career_matches >= 300,
+  milestone_bench_warmer: (p) => p.club !== null && !p.injured && p.age >= 20 && p.matches <= 1,
+};
+
+export function getEventWeight(ev: GameEvent, traits: Trait[]): number {
+  let w = ev.priority;
+  if (
+    traits.includes("extrovert") &&
+    ["social", "media_social", "fan_interaction", "endorsement", "partner"].includes(ev.category)
+  ) {
+    w *= 1.5;
+  }
+  if (
+    traits.includes("introvert") &&
+    ["psychology", "family", "training_development", "education", "religion_culture"].includes(ev.category)
+  ) {
+    w *= 1.5;
+  }
+  if (
+    traits.includes("media_friendly") &&
+    (ev.tone === "positive" || ["media_social", "endorsement", "fan_interaction"].includes(ev.category))
+  ) {
+    w *= 1.5;
+  }
+  if (
+    traits.includes("controversial") &&
+    (ev.tone === "critical" || ["legal", "gambling", "media_social"].includes(ev.category))
+  ) {
+    w *= 1.6;
+  }
+  if (
+    traits.includes("temperamental") &&
+    (["psychology", "team_dynamics", "fan_interaction"].includes(ev.category) || ev.tone === "critical")
+  ) {
+    w *= 1.5;
+  }
+  if (["team_dynamics", "mentor", "career_transfer"].includes(ev.category)) {
+    if (traits.includes("leader")) w *= 1.4;
+    if (traits.includes("disruptive")) w *= 1.5;
+  }
+  return w;
+}
+
+// Roll whether an event triggers this week, checking career milestones first and modifying probability/weights by traits
 export function rollEventForPlayer(player: Player, occurredCounts: Record<string, number>): GameEvent | null {
-  if (Math.random() > 0.4) return null;
+  for (const ev of EVENTS) {
+    const check = MILESTONE_CONDITIONS[ev.id];
+    if (check && (occurredCounts[ev.id] ?? 0) < 1 && check(player)) {
+      return ev;
+    }
+  }
+
+  let triggerProb = 0.35;
+  if (player.traits.includes("risk_taker")) triggerProb += 0.08;
+  if (player.traits.includes("controversial")) triggerProb += 0.07;
+  if (player.traits.includes("clean_cut")) triggerProb -= 0.05;
+  if (Math.random() > triggerProb) return null;
 
   const phase = careerPhase(player.age);
   const eligible = EVENTS.filter((ev) => {
     if (ev.max_occurrences != null && (occurredCounts[ev.id] ?? 0) >= ev.max_occurrences) {
+      return false;
+    }
+    const milestoneCheck = MILESTONE_CONDITIONS[ev.id];
+    if (milestoneCheck && !milestoneCheck(player)) {
       return false;
     }
     if (ev.condition.phase && !ev.condition.phase.includes(phase)) {
@@ -920,16 +1254,23 @@ export function rollEventForPlayer(player: Player, occurredCounts: Record<string
     if (ev.condition.excludes_trait && ev.condition.excludes_trait.some((t) => player.traits.includes(t))) {
       return false;
     }
+    if (ev.condition.requires_overall_min != null && player.overall < ev.condition.requires_overall_min) {
+      return false;
+    }
+    if (ev.condition.requires_overall_max != null && player.overall > ev.condition.requires_overall_max) {
+      return false;
+    }
     return true;
   });
 
   if (eligible.length === 0) return null;
 
-  const totalWeight = eligible.reduce((s, ev) => s + ev.priority, 0);
+  const weights = eligible.map((ev) => getEventWeight(ev, player.traits));
+  const totalWeight = weights.reduce((s, w) => s + w, 0);
   let r = Math.random() * totalWeight;
-  for (const ev of eligible) {
-    r -= ev.priority;
-    if (r <= 0) return ev;
+  for (let i = 0; i < eligible.length; i++) {
+    r -= weights[i];
+    if (r <= 0) return eligible[i];
   }
   return eligible[0];
 }
@@ -959,6 +1300,8 @@ export function applyEventChoice(playerId: number, eventId: string, choiceId: st
   if (da) summaryParts.push(`Finishing ${da > 0 ? "+" : ""}${da}`);
   if (dt) summaryParts.push(`Teknik ${dt > 0 ? "+" : ""}${dt}`);
   if (dp) summaryParts.push(`Fisik ${dp > 0 ? "+" : ""}${dp}`);
+  if (eff.reputation) summaryParts.push(`Reputasi ${eff.reputation > 0 ? "+" : ""}${eff.reputation}`);
+  if (eff.money) summaryParts.push(`Bonus Rp ${eff.money.toLocaleString("id-ID")}`);
 
   const traits = [...player.traits];
   const intensity: Partial<Record<Trait, number>> = { ...player.trait_intensity };
@@ -987,6 +1330,12 @@ export function applyEventChoice(playerId: number, eventId: string, choiceId: st
     }
   }
 
+  const requestTransfer =
+    choiceId === "complain_media" || choiceId === "request_transfer" ? 1 : player.on_transfer_list ? 1 : 0;
+  if (choiceId === "complain_media" || choiceId === "request_transfer") {
+    summaryParts.push("Masuk Daftar Transfer");
+  }
+
   const db = getDB();
   db.run(
     `UPDATE players SET
@@ -999,10 +1348,31 @@ export function applyEventChoice(playerId: number, eventId: string, choiceId: st
        passing = MIN(100, MAX(1, passing + ?)),
        strength = MIN(100, MAX(1, strength + ?)),
        work_rate = MIN(100, MAX(1, work_rate + ?)),
-       traits = ?, trait_intensity = ?
+       traits = ?, trait_intensity = ?, on_transfer_list = ?
      WHERE id = ?`,
-    [newForm, newStamina, dm, dm, da, da, dt, dt, dp, dp, JSON.stringify(traits), JSON.stringify(intensity), playerId],
+    [
+      newForm,
+      newStamina,
+      dm,
+      dm,
+      da,
+      da,
+      dt,
+      dt,
+      dp,
+      dp,
+      JSON.stringify(traits),
+      JSON.stringify(intensity),
+      requestTransfer,
+      playerId,
+    ],
   );
 
   return summaryParts.join(" · ") || "Tidak ada perubahan signifikan";
+}
+
+export function getChoiceLegalCase(eventId: string, choiceId: string): string | null {
+  const ev = EVENTS.find((e) => e.id === eventId);
+  const choice = ev?.choices.find((c) => c.id === choiceId);
+  return choice?.effects.legal_case ?? null;
 }

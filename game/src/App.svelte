@@ -1,11 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import type { WorldState, Position, MatchResult, Player, GameEvent } from "./types/index.js";
-  import type { UpcomingFixture, StandingRow } from "./engine/scheduler.js";
+  import type {
+    UpcomingFixture,
+    StandingRow,
+    ClubManagerConfig,
+    ClubStaffLevels,
+    TransferTarget,
+  } from "./engine/scheduler.js";
   import type { MatchStep } from "./engine/match.js";
   import type { TransferOffer } from "./engine/transfers.js";
   import type { LeagueLeaders, CareerSeasonRow } from "./engine/awards.js";
-  import { persistSave, readSave, saveMeta, loadMeta, clearMeta } from "./engine/savegame.js";
+  import {
+    persistSave, readSave, saveMeta, loadMeta, clearMeta,
+    loadAllMeta, deleteSlot, MAX_SLOTS,
+  } from "./engine/savegame.js";
   import type { SaveMeta } from "./engine/savegame.js";
   import NewGame from "./ui/routes/NewGame.svelte";
   import CareerLoop from "./ui/routes/CareerLoop.svelte";
@@ -16,14 +25,25 @@
   import StatsBoard from "./ui/components/StatsBoard.svelte";
   import MatchWheel from "./ui/components/MatchWheel.svelte";
   import EventModal from "./ui/components/EventModal.svelte";
+  import LegalModal from "./ui/components/LegalModal.svelte";
   import TransferModal from "./ui/components/TransferModal.svelte";
   import ManagerTransferModal from "./ui/components/ManagerTransferModal.svelte";
+  import RetirementModal from "./ui/components/RetirementModal.svelte";
+  import PunditLoop from "./ui/routes/PunditLoop.svelte";
+  import type { RetirementOptions, PunditState } from "./engine/retirement.js";
   import type { AgentState, ClientPlayer } from "./engine/agent.js";
   import type { OwnerState, SlotMarketRow } from "./engine/owner.js";
+  import type { FormatProposalView } from "./engine/stages.js";
+  import type { LegalCase, LegalResolutionInput } from "./engine/legal.js";
+  import type { TarkanLeague, TarkanStanding, TarkanFixture } from "./engine/tarkan.js";
+  import type { CupRound } from "./engine/cup.js";
+  import type { AFCRound, AFCGroupStanding } from "./engine/afc.js";
+  import type { U21StandingRow } from "./engine/scheduler.js";
+  import type { TimnasSquadInfo } from "./engine/timnas.js";
   import GameWorker from "./engine/worker.ts?worker";
 
   type Screen = "loading" | "error" | "title" | "new_game" | "career";
-  type GameMode = "player" | "manager" | "agent" | "owner";
+  type GameMode = "player" | "manager" | "agent" | "owner" | "pundit";
 
   let screen = $state<Screen>("loading");
   let gameMode = $state<GameMode>("player");
@@ -40,6 +60,8 @@
   interface FreeAgent { id: number; name: string; position: string; age: number; overall: number; ca: number; pa: number; wage: number; nationality: number; }
   let squad = $state<import("./types/index.js").Player[]>([]);
   let freeAgents = $state<FreeAgent[]>([]);
+  let transferTargets = $state<TransferTarget[]>([]);
+  let managerConfig = $state<ClubManagerConfig | null>(null);
   let managerTransferOpen = $state(false);
 
   // Agent mode state
@@ -53,9 +75,14 @@
   let ownerState = $state<OwnerState | null>(null);
   let clubMarket = $state<SlotMarketRow[]>([]);
 
+  // Retirement & Pundit state
+  let retirementOptions = $state<RetirementOptions | null>(null);
+  let punditState = $state<PunditState | null>(null);
+
   let egoPlayer = $state<Player | null>(null);
   let egoSuspended = $state(0);
   let activeEvent = $state<GameEvent | null>(null);
+  let activeLegalCase = $state<LegalCase | null>(null);
   let transferOffers = $state<TransferOffer[] | null>(null);
   let lastEventSummary = $state<string | null>(null);
   let playerMatch = $state<MatchResult | null>(null);
@@ -64,11 +91,38 @@
   let watchedAwayName = $state("");
   let upcoming = $state<UpcomingFixture[]>([]);
   let standings = $state<StandingRow[]>([]);
+  let standings2 = $state<StandingRow[]>([]);
+  let standings3 = $state<StandingRow[]>([]);
+  let allStandings = $state<Record<number, StandingRow[]>>({});
   let leaders = $state<LeagueLeaders>({ topScorers: [], topAssists: [], topRated: [] });
   let careerHistory = $state<CareerSeasonRow[]>([]);
   let championshipSeries = $state(false);
-  let saveMeta_ = $state<SaveMeta | null>(loadMeta());
+  let formatProposal = $state<FormatProposalView | null>(null);
+  let allMeta = $state<(SaveMeta | null)[]>(loadAllMeta());
+  let activeSlot = $state(0);
   let saveStatus = $state<"idle" | "saving" | "saved">("idle");
+  // Legacy compat — first occupied slot or slot 0
+  const saveMeta_ = $derived(allMeta.find(Boolean) ?? null);
+
+  // Tarkan state
+  let tarkanLeagues = $state<TarkanLeague[]>([]);
+  let tarkanStandings = $state<TarkanStanding[]>([]);
+  let tarkanFixtures = $state<TarkanFixture[]>([]);
+  let tarkanMsg = $state<string | null>(null);
+
+  // Cup state
+  let cupRounds = $state<CupRound[]>([]);
+
+  // AFC state
+  let afcRounds = $state<AFCRound[]>([]);
+  let afcGroupStandings = $state<AFCGroupStanding[]>([]);
+
+  // U-21 state
+  let u21Standings = $state<U21StandingRow[]>([]);
+
+  // Timnas state
+  let timnasInfo = $state<TimnasSquadInfo | null>(null);
+  let timnasMsg = $state<string | null>(null);
 
   let worker: Worker;
 
@@ -77,6 +131,9 @@
 
     worker.onmessage = (e) => {
       const msg = e.data;
+      if (msg.all_standings) {
+        allStandings = msg.all_standings;
+      }
       if (msg.type === "READY") {
         screen = "title";
       } else if (msg.type === "MANAGER_STARTED") {
@@ -87,8 +144,11 @@
         const foundClub = clubs.find((c) => c[0] === playerClubId);
         clubName = foundClub?.[1] ?? "Unknown";
         standings = msg.standings ?? [];
+        standings2 = msg.standings2 ?? [];
+        standings3 = msg.standings3 ?? [];
         upcoming = msg.upcoming ?? [];
         squad = msg.squad ?? [];
+        if (msg.manager_config) managerConfig = msg.manager_config;
         if (msg.leaders) leaders = msg.leaders;
         if (msg.championship_series !== undefined) championshipSeries = msg.championship_series;
         screen = "career";
@@ -101,6 +161,8 @@
         playerName = agentState?.name ?? "";
         clubName = agentState?.office_name ?? "Agensi";
         standings = msg.standings ?? [];
+        standings2 = msg.standings2 ?? [];
+        standings3 = msg.standings3 ?? [];
         if (msg.leaders) leaders = msg.leaders;
         if (msg.championship_series !== undefined) championshipSeries = msg.championship_series;
         lastEventSummary = null;
@@ -110,6 +172,8 @@
         if (msg.agent_clients !== undefined) agentClients = msg.agent_clients;
         if (msg.scout_list !== undefined) scoutList = msg.scout_list;
         if (msg.standings) standings = msg.standings;
+        if (msg.standings2) standings2 = msg.standings2;
+        if (msg.standings3) standings3 = msg.standings3;
         lastEventSummary = msg.summary ?? null;
         transferOffers = null;
         negotiatingClientId = null;
@@ -123,6 +187,8 @@
         clubName = ownerState?.club?.name ?? "Konsorsium";
         upcoming = msg.upcoming ?? [];
         standings = msg.standings ?? [];
+        standings2 = msg.standings2 ?? [];
+        standings3 = msg.standings3 ?? [];
         if (msg.leaders) leaders = msg.leaders;
         if (msg.championship_series !== undefined) championshipSeries = msg.championship_series;
         lastEventSummary = null;
@@ -138,14 +204,25 @@
         if (msg.club_name !== undefined) clubName = msg.club_name;
         if (msg.upcoming !== undefined) upcoming = msg.upcoming;
         if (msg.standings !== undefined) standings = msg.standings;
+        if (msg.standings2 !== undefined) standings2 = msg.standings2;
+        if (msg.standings3 !== undefined) standings3 = msg.standings3;
         lastEventSummary = msg.summary ?? null;
       } else if (msg.type === "FREE_AGENTS") {
         freeAgents = msg.agents ?? [];
+        if (msg.transfer_targets) transferTargets = msg.transfer_targets;
+        if (msg.manager_config) managerConfig = msg.manager_config;
       } else if (msg.type === "SQUAD") {
         squad = msg.squad ?? [];
+        if (msg.manager_config) managerConfig = msg.manager_config;
       } else if (msg.type === "MANAGER_TRANSFER_DONE") {
         squad = msg.squad ?? [];
-        freeAgents = msg.free_agents ?? [];
+        if (msg.free_agents) freeAgents = msg.free_agents;
+        if (msg.transfer_targets) transferTargets = msg.transfer_targets;
+        if (msg.manager_config) managerConfig = msg.manager_config;
+        lastEventSummary = msg.summary ?? null;
+      } else if (msg.type === "MANAGER_CONFIG_UPDATED") {
+        if (msg.manager_config) managerConfig = msg.manager_config;
+        if (msg.squad) squad = msg.squad;
         lastEventSummary = msg.summary ?? null;
       } else if (msg.type === "WORLD_STATE") {
         world = msg.state;
@@ -160,6 +237,8 @@
         lastEventSummary = null;
         upcoming = msg.upcoming ?? [];
         standings = msg.standings ?? [];
+        standings2 = msg.standings2 ?? [];
+        standings3 = msg.standings3 ?? [];
         if (msg.leaders) leaders = msg.leaders;
         if (msg.career_history) careerHistory = msg.career_history;
         if (msg.championship_series !== undefined) championshipSeries = msg.championship_series;
@@ -168,6 +247,7 @@
         if (msg.ego_player !== undefined) egoPlayer = msg.ego_player;
         if (msg.ego_suspended_matches !== undefined) egoSuspended = msg.ego_suspended_matches;
         activeEvent = msg.triggered_event ?? null;
+        if (msg.legal_case !== undefined) activeLegalCase = msg.legal_case;
         if (msg.transfer_offers) transferOffers = msg.transfer_offers;
         lastEventSummary = msg.season_summary ?? null;
         playerMatch = msg.player_match ?? null;
@@ -176,18 +256,76 @@
         watchedAwayName = msg.watched_away_name ?? "";
         upcoming = msg.upcoming ?? [];
         standings = msg.standings ?? standings;
+        standings2 = msg.standings2 ?? standings2;
+        standings3 = msg.standings3 ?? standings3;
         if (msg.squad) squad = msg.squad;
+        if (msg.manager_config) managerConfig = msg.manager_config;
         if (msg.agent_state !== undefined) agentState = msg.agent_state;
         if (msg.agent_clients !== undefined) agentClients = msg.agent_clients;
         if (msg.scout_list !== undefined) scoutList = msg.scout_list;
         if (msg.owner_state !== undefined) ownerState = msg.owner_state;
         if (msg.club_market !== undefined) clubMarket = msg.club_market;
+        if (msg.pundit_state !== undefined) punditState = msg.pundit_state;
         if (msg.leaders) leaders = msg.leaders;
         if (msg.career_history) careerHistory = msg.career_history;
+        if (msg.championship_series !== undefined) championshipSeries = msg.championship_series;
+        if (msg.format_proposal !== undefined) formatProposal = msg.format_proposal;
+      } else if (msg.type === "RETIREMENT_OPTIONS_READY") {
+        retirementOptions = msg.options;
+      } else if (msg.type === "RETIREMENT_PATH_CHOSEN") {
+        retirementOptions = null;
+        lastEventSummary = msg.summary ?? null;
+        world = msg.state;
+        gameMode = msg.mode;
+        if (msg.mode === "manager") {
+          playerClubId = msg.club_id;
+          const foundClub = clubs.find((c) => c[0] === playerClubId);
+          clubName = foundClub?.[1] ?? clubName;
+          upcoming = msg.upcoming ?? [];
+          standings = msg.standings ?? [];
+          standings2 = msg.standings2 ?? [];
+          standings3 = msg.standings3 ?? [];
+          if (msg.all_standings) allStandings = msg.all_standings;
+          squad = msg.squad ?? [];
+          managerConfig = msg.manager_config ?? null;
+          if (msg.leaders) leaders = msg.leaders;
+        } else if (msg.mode === "agent") {
+          agentState = msg.agent_state ?? null;
+          agentClients = msg.agent_clients ?? [];
+          scoutList = msg.scout_list ?? [];
+          if (msg.leaders) leaders = msg.leaders;
+        } else if (msg.mode === "pundit") {
+          punditState = msg.pundit_state ?? null;
+          standings = msg.standings ?? [];
+          standings2 = msg.standings2 ?? [];
+          if (msg.all_standings) allStandings = msg.all_standings;
+          if (msg.leaders) leaders = msg.leaders;
+        }
+      } else if (msg.type === "PUNDIT_UPDATED") {
+        punditState = msg.pundit_state ?? punditState;
+        lastEventSummary = msg.summary ?? lastEventSummary;
       } else if (msg.type === "EVENT_CHOICE_APPLIED") {
         if (msg.ego_player !== undefined) egoPlayer = msg.ego_player;
+        if (msg.legal_case !== undefined) activeLegalCase = msg.legal_case;
         lastEventSummary = msg.summary ?? null;
         activeEvent = null;
+      } else if (msg.type === "CHILD_TRANSITIONED") {
+        world = msg.state;
+        egoPlayer = msg.ego_player ?? null;
+        egoSuspended = 0;
+        if (msg.club_id !== undefined) playerClubId = msg.club_id;
+        const foundClub = clubs.find((c) => c[0] === playerClubId);
+        clubName = foundClub?.[1] ?? clubName;
+        playerName = egoPlayer?.name ?? playerName;
+        if (msg.upcoming) upcoming = msg.upcoming;
+        if (msg.career_history) careerHistory = msg.career_history;
+        lastEventSummary = msg.summary ?? null;
+      } else if (msg.type === "LEGAL_CASE_RESOLVED") {
+        if (msg.ego_player !== undefined) egoPlayer = msg.ego_player;
+        if (msg.agent_state !== undefined) agentState = msg.agent_state;
+        if (msg.owner_state !== undefined) ownerState = msg.owner_state;
+        activeLegalCase = null;
+        lastEventSummary = msg.summary ?? null;
       } else if (msg.type === "TRANSFER_OFFERS") {
         transferOffers = msg.offers ?? [];
       } else if (msg.type === "TRANSFER_ACCEPTED") {
@@ -196,26 +334,32 @@
         if (msg.club_name !== undefined) clubName = msg.club_name;
         if (msg.upcoming) upcoming = msg.upcoming;
         if (msg.standings) standings = msg.standings;
+        if (msg.standings2) standings2 = msg.standings2;
+        if (msg.standings3) standings3 = msg.standings3;
         lastEventSummary = msg.summary ?? null;
         transferOffers = null;
       } else if (msg.type === "FORMAT_UPDATED") {
         championshipSeries = msg.championship_series ?? false;
+        if (msg.format_proposal !== undefined) formatProposal = msg.format_proposal;
         lastEventSummary = msg.summary ?? null;
       } else if (msg.type === "STANDINGS") {
         standings = msg.standings ?? [];
+        if (msg.standings2) standings2 = msg.standings2;
       } else if (msg.type === "UPCOMING") {
         upcoming = msg.upcoming ?? [];
       } else if (msg.type === "SAVE_DATA") {
         const meta: SaveMeta = {
+          slot: activeSlot,
           playerName,
           clubName,
           season: world?.season ?? 1,
           currentDay: world?.current_day ?? 0,
           savedAt: Date.now(),
+          mode: gameMode,
         };
-        persistSave(msg.payload).then(() => {
+        persistSave(msg.payload, activeSlot).then(() => {
           saveMeta(meta);
-          saveMeta_ = meta;
+          allMeta = loadAllMeta();
           saveStatus = "saved";
           setTimeout(() => (saveStatus = "idle"), 2000);
         });
@@ -254,11 +398,58 @@
         lastEventSummary = null;
         upcoming = msg.upcoming ?? [];
         standings = msg.standings ?? [];
+        standings2 = msg.standings2 ?? [];
+        standings3 = msg.standings3 ?? [];
         if (msg.squad) squad = msg.squad;
+        if (msg.manager_config) managerConfig = msg.manager_config;
         if (msg.leaders) leaders = msg.leaders;
         if (msg.career_history) careerHistory = msg.career_history;
         if (msg.championship_series !== undefined) championshipSeries = msg.championship_series;
+        if (msg.format_proposal !== undefined) formatProposal = msg.format_proposal;
         screen = "career";
+      } else if (msg.type === "CUP_BRACKET") {
+        cupRounds = msg.rounds;
+      } else if (msg.type === "AFC_BRACKET") {
+        afcRounds = msg.rounds;
+        afcGroupStandings = msg.groupStandings;
+      } else if (msg.type === "U21_STANDINGS") {
+        u21Standings = msg.standings;
+      } else if (msg.type === "TIMNAS_INFO") {
+        timnasInfo = msg.info;
+      } else if (msg.type === "TIMNAS_MATCH_RESULT") {
+        timnasMsg = msg.summary;
+        if (msg.ego_player) egoPlayer = msg.ego_player;
+        if (msg.info) timnasInfo = msg.info;
+      } else if (msg.type === "NATURALIZE_RESULT") {
+        timnasMsg = msg.summary;
+        if (msg.ego_player) egoPlayer = msg.ego_player;
+      } else if (msg.type === "TARKAN_LEAGUES") {
+        tarkanLeagues = msg.leagues;
+      } else if (msg.type === "TARKAN_ENROLLED") {
+        tarkanLeagues = msg.leagues;
+        tarkanMsg = msg.summary;
+        // Auto-fetch standings/fixtures for enrolled league
+        const enrolled = (msg.leagues as TarkanLeague[]).find((l) => l.enrolled);
+        if (enrolled?.enrolledClubId) {
+          worker.postMessage({ type: "TARKAN_GET_STANDINGS", leagueId: enrolled.id });
+          worker.postMessage({ type: "TARKAN_GET_FIXTURES", leagueId: enrolled.id, clubId: enrolled.enrolledClubId });
+        } else {
+          tarkanStandings = [];
+          tarkanFixtures = [];
+        }
+      } else if (msg.type === "TARKAN_STANDINGS") {
+        tarkanStandings = msg.standings;
+      } else if (msg.type === "TARKAN_FIXTURES") {
+        tarkanFixtures = msg.fixtures;
+      } else if (msg.type === "TARKAN_MATCH_RESULT") {
+        tarkanMsg = msg.summary;
+        if (msg.ego_player) egoPlayer = msg.ego_player;
+        // Refresh fixtures/standings
+        const enrolled = tarkanLeagues.find((l) => l.enrolled);
+        if (enrolled?.enrolledClubId) {
+          worker.postMessage({ type: "TARKAN_GET_STANDINGS", leagueId: enrolled.id });
+          worker.postMessage({ type: "TARKAN_GET_FIXTURES", leagueId: enrolled.id, clubId: enrolled.enrolledClubId });
+        }
       } else if (msg.type === "ERROR") {
         screen = "error";
         console.error("Worker error:", msg.message);
@@ -274,7 +465,8 @@
     return () => worker.terminate();
   });
 
-  function openNewGame(mode: GameMode = "player") {
+  function openNewGame(mode: GameMode = "player", slot = activeSlot) {
+    activeSlot = slot;
     gameMode = mode;
     worker.postMessage({ type: "NEW_GAME", mode, characterId: 0, startAge: 17 });
     screen = "new_game";
@@ -312,7 +504,7 @@
   }
 
   function openManagerTransfers() {
-    worker.postMessage({ type: "GET_FREE_AGENTS" });
+    worker.postMessage({ type: "GET_FREE_AGENTS", clubId: playerClubId });
     managerTransferOpen = true;
   }
 
@@ -320,8 +512,40 @@
     worker.postMessage({ type: "MANAGER_SIGN", playerId, clubId: playerClubId });
   }
 
+  function managerBuy(playerId: number) {
+    worker.postMessage({ type: "MANAGER_BUY_PLAYER", playerId, clubId: playerClubId });
+  }
+
   function managerRelease(playerId: number) {
     worker.postMessage({ type: "MANAGER_RELEASE", playerId });
+  }
+
+  function managerSetTactics(
+    formation: ClubManagerConfig["formation"],
+    mentality: ClubManagerConfig["mentality"],
+  ) {
+    worker.postMessage({ type: "MANAGER_SET_TACTICS", clubId: playerClubId, formation, mentality });
+  }
+
+  function managerToggleStarter(playerId: number) {
+    worker.postMessage({ type: "MANAGER_TOGGLE_STARTER", clubId: playerClubId, playerId });
+  }
+
+  function managerUpgradeStaff(role: keyof ClubStaffLevels) {
+    worker.postMessage({ type: "MANAGER_UPGRADE_STAFF", clubId: playerClubId, role });
+  }
+
+  function handleWatchedMatchFinish(finalHomeGoals: number, finalAwayGoals: number) {
+    if (playerMatch && (playerMatch.home_goals !== finalHomeGoals || playerMatch.away_goals !== finalAwayGoals)) {
+      playerMatch = { ...playerMatch, home_goals: finalHomeGoals, away_goals: finalAwayGoals };
+      worker.postMessage({
+        type: "APPLY_MIDMATCH_SCORE",
+        matchId: playerMatch.id,
+        homeGoals: finalHomeGoals,
+        awayGoals: finalAwayGoals,
+        playerClubId,
+      });
+    }
   }
 
   function agentRecruit(playerId: number) {
@@ -348,6 +572,10 @@
 
   function ownerLoan(amount: number) {
     worker.postMessage({ type: "OWNER_LOAN", amount });
+  }
+
+  function ownerLoanShark(amount: number) {
+    worker.postMessage({ type: "OWNER_LOAN_SHARK", amount });
   }
 
   function ownerRepay(amount: number) {
@@ -386,8 +614,80 @@
     worker.postMessage({ type: "CHOOSE_EVENT", eventId, choiceId });
   }
 
+  function resolveLegal(input: LegalResolutionInput) {
+    worker.postMessage({ type: "RESOLVE_LEGAL_CASE", input });
+  }
+
   function openTransfers() {
     worker.postMessage({ type: "OPEN_TRANSFERS" });
+  }
+
+  function playTarkam() {
+    worker.postMessage({ type: "PLAY_TARKAM" });
+  }
+
+  function getCupBracket() {
+    worker.postMessage({ type: "GET_CUP_BRACKET" });
+  }
+
+  function getAFCBracket() {
+    worker.postMessage({ type: "GET_AFC_BRACKET" });
+  }
+
+  function getU21Standings(overrideLeagueId?: number) {
+    if (overrideLeagueId) {
+      worker.postMessage({ type: "GET_U21_STANDINGS", leagueId: overrideLeagueId });
+      return;
+    }
+    const isEPL = (playerClubId >= 103 && playerClubId <= 110) || (clubs.find((c) => c[0] === playerClubId)?.[3] === 11);
+    worker.postMessage({ type: "GET_U21_STANDINGS", leagueId: isEPL ? 31 : 30 });
+  }
+
+  function timnasGetInfo() {
+    worker.postMessage({ type: "TIMNAS_GET_INFO" });
+  }
+  function timnasPlayMatch() {
+    worker.postMessage({ type: "TIMNAS_PLAY_MATCH" });
+  }
+  function doNaturalize() {
+    worker.postMessage({ type: "NATURALIZE" });
+  }
+
+  function tarkanGetLeagues() {
+    worker.postMessage({ type: "TARKAN_GET_LEAGUES" });
+  }
+  function tarkanEnroll(leagueId: number) {
+    worker.postMessage({ type: "TARKAN_ENROLL", leagueId });
+  }
+  function tarkanUnenroll() {
+    worker.postMessage({ type: "TARKAN_UNENROLL" });
+  }
+  function tarkanPlayMatch(matchId: number) {
+    worker.postMessage({ type: "TARKAN_PLAY_MATCH", matchId });
+  }
+
+  function transitionChild() {
+    worker.postMessage({ type: "TRANSITION_TO_CHILD" });
+  }
+
+  function openRetirementModal() {
+    worker.postMessage({ type: "GET_RETIREMENT_OPTIONS" });
+  }
+
+  function chooseRetirement(
+    choice: "manager" | "agent" | "staff" | "pundit" | "child",
+    extraData?: {
+      clubId?: number;
+      agencyName?: string;
+      role?: import("./engine/scheduler.js").ClubStaffLevels extends Record<infer K, any> ? K : never;
+      childName?: string;
+    },
+  ) {
+    worker.postMessage({ type: "CHOOSE_RETIREMENT_PATH", choice, extraData });
+  }
+
+  function punditAction(actionId: "criticize_manager" | "praise_wonderkid" | "leak_dressing_room" | "neutral_analysis") {
+    worker.postMessage({ type: "PUNDIT_ACTION", actionId });
   }
 
   function acceptTransfer(offer: TransferOffer) {
@@ -399,7 +699,11 @@
   }
 
   function toggleChampionshipSeries() {
-    worker.postMessage({ type: "TOGGLE_CHAMPIONSHIP_SERIES", enable: !championshipSeries });
+    worker.postMessage({ type: "TOGGLE_CHAMPIONSHIP_SERIES", enable: !championshipSeries, clubId: playerClubId });
+  }
+
+  function voteFormatProposal(proposalId: number, choice: "for" | "against" | "abstain") {
+    worker.postMessage({ type: "VOTE_FORMAT_PROPOSAL", proposalId, choice, clubId: playerClubId });
   }
 
   function saveGame() {
@@ -408,10 +712,17 @@
     worker.postMessage({ type: "SAVE_GAME" });
   }
 
-  async function continueGame() {
-    const payload = await readSave();
+  async function continueGame(slot = activeSlot) {
+    activeSlot = slot;
+    const payload = await readSave(slot);
     if (!payload) return;
     worker.postMessage({ type: "LOAD_GAME", payload });
+  }
+
+  async function deleteAndReset(slot: number) {
+    await deleteSlot(slot);
+    clearMeta(slot);
+    allMeta = loadAllMeta();
   }
 </script>
 
@@ -426,29 +737,37 @@
     <div class="title-screen">
       <h1>⚽ Football Life Simulator</h1>
       <p class="tagline">Karir. Drama. Warisan.</p>
-      <div class="title-buttons">
-        <button onclick={continueGame} class="btn-primary" disabled={!saveMeta_}>
-          Lanjut Game
-        </button>
-        {#if saveMeta_}
-          <div class="save-info">
-            <span class="save-label">{saveMeta_.playerName} · Musim {saveMeta_.season}</span>
-            <span class="save-date">{new Date(saveMeta_.savedAt).toLocaleDateString("id-ID")}</span>
+
+      <!-- Save slots -->
+      <div class="slot-grid">
+        {#each Array.from({ length: MAX_SLOTS }, (_, i) => i) as i}
+          {@const meta = allMeta[i]}
+          <div class="slot-card" class:active-slot={activeSlot === i}>
+            <div class="slot-header">
+              <span class="slot-label">Slot {i + 1}</span>
+              {#if meta}<button class="slot-delete" onclick={() => deleteAndReset(i)} title="Hapus">✕</button>{/if}
+            </div>
+            {#if meta}
+              <p class="slot-name">{meta.playerName}</p>
+              <p class="slot-detail">{meta.clubName} · Musim {meta.season} · {meta.mode ?? "player"}</p>
+              <p class="slot-date">{new Date(meta.savedAt).toLocaleDateString("id-ID")}</p>
+              <button class="btn-primary slot-continue" onclick={() => continueGame(i)}>▶ Lanjut</button>
+            {:else}
+              <p class="slot-empty">— Kosong —</p>
+              <div class="slot-newgame">
+                <button onclick={() => openNewGame("player", i)}>🧑 Pemain</button>
+                <button onclick={() => openNewGame("manager", i)}>🎯 Manajer</button>
+                <button onclick={() => openNewGame("agent", i)}>🕵️ Agen</button>
+                <button onclick={() => openNewGame("owner", i)}>👑 Pemilik</button>
+              </div>
+            {/if}
           </div>
-        {:else}
-          <span class="save-empty">Belum ada save</span>
-        {/if}
-        <div class="mode-select">
-          <button onclick={() => openNewGame("player")} class="btn-secondary">🧑 Mode Pemain</button>
-          <button onclick={() => openNewGame("manager")} class="btn-secondary">🎯 Mode Manajer</button>
-          <button onclick={() => openNewGame("agent")} class="btn-secondary">🕵️ Mode Agen</button>
-          <button onclick={() => openNewGame("owner")} class="btn-secondary">👑 Mode Pemilik</button>
-        </div>
+        {/each}
       </div>
     </div>
 
   {:else if screen === "new_game" && clubs.length > 0}
-    <NewGame {clubs} {leagues} mode={gameMode} onstart={startCareer} />
+    <NewGame {clubs} {leagues} mode={gameMode === "pundit" ? "player" : gameMode} onstart={startCareer} />
 
   {:else if screen === "new_game"}
     <p class="center">Membuat dunia…</p>
@@ -459,20 +778,35 @@
         steps={watchedSteps}
         homeName={watchedHomeName}
         awayName={watchedAwayName}
+        canIntervene={gameMode === "manager"}
+        userClubName={clubName}
+        onfinish={handleWatchedMatchFinish}
         onclose={() => (watchedSteps = null)}
       />
     {:else}
-      {#if activeEvent}
+      {#if activeLegalCase}
+        <LegalModal legalCase={activeLegalCase} onresolve={resolveLegal} />
+      {:else if activeEvent}
         <EventModal event={activeEvent} onchoose={chooseEvent} />
+      {/if}
+      {#if retirementOptions}
+        <RetirementModal
+          options={retirementOptions}
+          onchoose={chooseRetirement}
+          onclose={() => (retirementOptions = null)}
+        />
       {/if}
       {#if gameMode === "manager"}
         {#if managerTransferOpen}
           <ManagerTransferModal
             {squad}
             {freeAgents}
+            {transferTargets}
+            clubCash={managerConfig?.club_cash ?? 0}
             clubId={playerClubId}
             onclose={() => (managerTransferOpen = false)}
             onsign={managerSign}
+            onbuy={managerBuy}
             onrelease={managerRelease}
           />
         {/if}
@@ -481,16 +815,20 @@
           managerName={playerName}
           managerClubId={playerClubId}
           {clubName}
-          {standings}
+          standings={standings2.some((r) => r.club_id === playerClubId) ? standings2 : standings}
           {upcoming}
           {squad}
+          {managerConfig}
           lastSummary={lastEventSummary}
-          hasActiveEvent={activeEvent !== null}
+          hasActiveEvent={activeEvent !== null || activeLegalCase !== null}
           playerMatch={playerMatch}
           {championshipSeries}
           onadvance={advance}
           onopentransfers={openManagerTransfers}
           ontoggleformat={toggleChampionshipSeries}
+          onsettactics={managerSetTactics}
+          ontogglestarter={managerToggleStarter}
+          onupgradestaff={managerUpgradeStaff}
         />
       {:else if gameMode === "agent" && agentState}
         {#if transferOffers && transferOffers.length > 0}
@@ -524,14 +862,15 @@
           {world}
           {ownerState}
           {clubMarket}
-          {standings}
+          standings={standings2.some((r) => r.club_id === playerClubId) ? standings2 : standings}
           {upcoming}
           lastSummary={lastEventSummary}
-          hasActiveEvent={activeEvent !== null}
+          hasActiveEvent={activeEvent !== null || activeLegalCase !== null}
           playerMatch={playerMatch}
           {championshipSeries}
           onadvance={advance}
           onloan={ownerLoan}
+          onloanshark={ownerLoanShark}
           onrepay={ownerRepay}
           oninject={ownerInject}
           ondividend={ownerDividend}
@@ -540,6 +879,14 @@
           onsellclub={ownerSellClub}
           onbuyclub={ownerBuyClub}
           ontoggleformat={toggleChampionshipSeries}
+        />
+      {:else if gameMode === "pundit" && punditState}
+        <PunditLoop
+          {world}
+          {punditState}
+          lastSummary={lastEventSummary}
+          onadvance={() => advance(false)}
+          onaction={punditAction}
         />
       {:else}
         {#if transferOffers && transferOffers.length > 0}
@@ -559,13 +906,37 @@
           {playerName}
           {playerPosition}
           {playerClubId}
+          playerLeagueId={clubs.find((c) => c[0] === playerClubId)?.[3] ?? (playerClubId >= 103 && playerClubId <= 110 ? 11 : 1)}
           {clubName}
           {playerMatch}
           {upcoming}
           {championshipSeries}
+          {tarkanLeagues}
+          {tarkanStandings}
+          {tarkanFixtures}
+          {tarkanMsg}
+          {cupRounds}
+          {afcRounds}
+          {afcGroupStandings}
+          {u21Standings}
+          {timnasInfo}
+          {timnasMsg}
           onadvance={advance}
+          ongetcupbracket={getCupBracket}
+          ongetafcbracket={getAFCBracket}
+          ongetu21standings={getU21Standings}
+          ontimnasgetinfo={timnasGetInfo}
+          ontimnasplaymatch={timnasPlayMatch}
+          onnaturalize={doNaturalize}
           onopentransfers={openTransfers}
           ontoggleformat={toggleChampionshipSeries}
+          onplaytarkam={playTarkam}
+          ontransitionchild={transitionChild}
+          onopenretirement={openRetirementModal}
+          ontarkangetleagues={tarkanGetLeagues}
+          ontarkanenroll={tarkanEnroll}
+          ontarkanunenroll={tarkanUnenroll}
+          ontarkanplaymatch={tarkanPlayMatch}
         />
       {/if}
       <div class="save-bar">
@@ -574,11 +945,21 @@
         </button>
       </div>
       {#if gameMode === "player"}
-        <StatsBoard {leaders} {careerHistory} egoId={egoPlayer?.id ?? 0} />
+        <StatsBoard {leaders} {careerHistory} egoId={egoPlayer?.id ?? 0} {egoPlayer} />
       {:else}
         <StatsBoard {leaders} careerHistory={[]} egoId={0} />
       {/if}
-      <LeagueTable {standings} {playerClubId} />
+      <LeagueTable
+        {standings}
+        {standings2}
+        {standings3}
+        {allStandings}
+        {playerClubId}
+        {championshipSeries}
+        {formatProposal}
+        onproposeformat={toggleChampionshipSeries}
+        onvoteformat={voteFormatProposal}
+      />
     {/if}
   {/if}
 </main>
@@ -675,46 +1056,23 @@
   }
   .btn-primary:hover:not(:disabled) { opacity: 0.88; }
   .btn-primary:disabled { opacity: 0.35; cursor: default; }
-  .btn-secondary {
-    padding: 0.6rem 1.8rem;
-    background: transparent;
-    color: var(--text2);
-    border: 1px solid var(--border2);
-    cursor: pointer;
-    font-family: inherit;
-    font-size: 0.9rem;
-    border-radius: var(--radius);
-    transition: color 0.15s, border-color 0.15s;
-  }
-  .btn-secondary:hover { color: var(--text); border-color: var(--text2); }
-  .title-buttons {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.75rem;
-    width: 100%;
-    max-width: 340px;
-  }
-  .title-buttons .btn-primary,
-  .title-buttons .btn-secondary { width: 100%; }
-  .mode-select {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.5rem;
-    width: 100%;
-  }
-  .mode-select .btn-secondary { padding: 0.6rem 0.75rem; font-size: 0.82rem; }
-  .save-info {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.2rem;
-    color: var(--text2);
-    font-size: 0.85rem;
-  }
-  .save-label { color: var(--text); }
-  .save-date { font-size: 0.78rem; }
-  .save-empty { color: var(--text3); font-size: 0.8rem; }
+  /* ── Save slots ── */
+  .slot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.5rem; max-width: 700px; width: 100%; }
+  .slot-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; display: flex; flex-direction: column; gap: 0.4rem; min-height: 160px; }
+  .slot-card.active-slot { border-color: var(--accent); }
+  .slot-header { display: flex; justify-content: space-between; align-items: center; }
+  .slot-label { font-size: 0.75rem; color: var(--text3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .slot-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.3rem; }
+  .slot-delete:hover { color: var(--red, #ef4444); }
+  .slot-name { font-size: 1rem; font-weight: 700; color: var(--text); }
+  .slot-detail { font-size: 0.78rem; color: var(--text2); }
+  .slot-date { font-size: 0.72rem; color: var(--text3); }
+  .slot-continue { padding: 0.4rem 0.8rem; font-size: 0.83rem; margin-top: 0.25rem; }
+  .slot-empty { color: var(--text3); font-size: 0.82rem; flex: 1; display: flex; align-items: center; justify-content: center; }
+  .slot-newgame { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.25rem; }
+  .slot-newgame button { background: none; border: 1px solid var(--border2); border-radius: 5px; color: var(--text2); cursor: pointer; padding: 0.3rem 0.4rem; font-size: 0.76rem; text-align: left; }
+  .slot-newgame button:hover { background: var(--surface2); color: var(--text); }
+
   .save-bar {
     display: flex;
     justify-content: flex-end;

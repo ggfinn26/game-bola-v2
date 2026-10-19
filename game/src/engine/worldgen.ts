@@ -1,6 +1,45 @@
 import { getDB } from "./db.js";
 import { calcPlayerCA, OUTFIELD_ATTRS, GK_ATTRS } from "./pa.js";
-import { LIGA1_CLUBS, INDO_FIRST, INDO_LAST, SQUAD_POSITIONS } from "../data/indonesia.js";
+import { generateCupR32 } from "./cup.js";
+import { generateAFCGroupStage } from "./afc.js";
+import {
+  LIGA1_CLUBS,
+  LIGA2_CLUBS,
+  LIGA3_CLUBS,
+  MALAYSIA_CLUBS,
+  THAILAND_CLUBS,
+  JAPAN_CLUBS,
+  KOREA_CLUBS,
+  SAUDI_CLUBS,
+  SINGAPORE_CLUBS,
+  ENGLAND_CLUBS,
+  CHAMPIONSHIP_CLUBS,
+  LEAGUE_ONE_CLUBS,
+  LEAGUE_TWO_CLUBS,
+  NATIONAL_LEAGUE_CLUBS,
+  SPAIN_CLUBS,
+  SEGUNDA_CLUBS,
+  PRIMERA_FED_CLUBS,
+  ITALY_CLUBS,
+  SERIE_B_CLUBS,
+  SERIE_C_CLUBS,
+  GERMANY_CLUBS,
+  ZWEITE_BUNDESLIGA_CLUBS,
+  DRITTE_LIGA_CLUBS,
+  LIGUE1_CLUBS,
+  LIGUE2_CLUBS,
+  NETHERLANDS_CLUBS,
+  EERSTE_DIVISIE_CLUBS,
+  PRIMEIRA_LIGA_CLUBS,
+  LIGA_PORTUGAL_2_CLUBS,
+  SUPER_LIG_CLUBS,
+  TFF_1_LIG_CLUBS,
+  VIETNAM_CLUBS,
+  NATION_NAMES,
+  INDO_FIRST,
+  INDO_LAST,
+  SQUAD_POSITIONS,
+} from "../data/indonesia.js";
 import type { Position, Trait } from "../types/index.js";
 
 // ponytail: seeded lcg so world is reproducible per seed
@@ -88,8 +127,10 @@ function genPlayer(
   leagueReputation: number,
   pos: Position,
   rng: () => number,
+  nationality = 1,
 ): Record<string, number | string | null> {
-  const name = `${pick(INDO_FIRST, rng)} ${pick(INDO_LAST, rng)}`;
+  const nPool = NATION_NAMES[nationality] ?? NATION_NAMES[1];
+  const name = `${pick(nPool.first, rng)} ${pick(nPool.last, rng)}`;
   const age = randInt(17, 34, rng);
 
   // base = (clubRep / 100) × 40 + rand(±10)
@@ -136,7 +177,7 @@ function genPlayer(
   return {
     id,
     name,
-    nationality: 1, // Indonesia = 1
+    nationality,
     club: clubId,
     position: pos,
     age,
@@ -297,64 +338,285 @@ export function createEgoPlayer(opts: {
   return id;
 }
 
+export function generateYouthRegens(season: number): number {
+  const db = getDB();
+  const rng = makeLCG(season * 7919 + 1337);
+  let nextId = ((db.exec(`SELECT COALESCE(MAX(id), 0) FROM players`)[0]?.values[0]?.[0] as number) ?? 0) + 1;
+  const clubsRes = db.exec(
+    `SELECT c.id, c.reputation, c.academy_level,
+            (SELECT COUNT(*) FROM players p WHERE p.club = c.id AND p.retired = 0) AS squad_count
+     FROM clubs c WHERE c.bankrupt = 0`,
+  );
+  let totalGenerated = 0;
+
+  for (const row of clubsRes[0]?.values ?? []) {
+    const clubId = row[0] as number;
+    const rep = row[1] as number;
+    const acadLevel = Math.max(1, (row[2] as number) ?? 2);
+    const squadCount = (row[3] as number) ?? 0;
+
+    // Academy intake: 1-2 regens depending on academy_level, plus top-up if squad < 16
+    const baseIntake = acadLevel >= 7 ? 3 : acadLevel >= 4 ? 2 : 1;
+    const needed = Math.max(baseIntake, Math.max(0, 16 - squadCount));
+    // Cap squad at 26 so clubs don't bloat infinitely
+    const count = Math.max(0, Math.min(needed, 26 - squadCount));
+    const effectiveRep = Math.min(95, Math.round(rep * 0.55 + acadLevel * 4.5));
+
+    for (let i = 0; i < count; i++) {
+      const pos = pick(SQUAD_POSITIONS, rng);
+      const p = genPlayer(nextId++, clubId, effectiveRep, pos, rng);
+      p.age = randInt(15, 17, rng);
+      const ca = p.ca as number;
+      const potBonus = 15 + acadLevel * 2 + randInt(0, 12, rng);
+      p.pa_ceiling = Math.min(100, ca + potBonus);
+      p.pa = Math.min(p.pa_ceiling as number, ca + Math.round(potBonus * 0.65));
+      p.contract_end = season * 365 + 730;
+      p.wage = Math.max(1_500_000, Math.round((p.wage as number) * 0.5));
+      insertPlayerRow(db, p);
+      totalGenerated++;
+    }
+  }
+  return totalGenerated;
+}
+
 export function generateWorld(seed = 42): void {
   const db = getDB();
   const rng = makeLCG(seed);
 
   db.run(
-    `DELETE FROM players; DELETE FROM clubs; DELETE FROM agents; DELETE FROM owners; DELETE FROM match_results; DELETE FROM league_slots; DELETE FROM card_accumulation;`,
+    `DELETE FROM players; DELETE FROM clubs; DELETE FROM agents; DELETE FROM owners; DELETE FROM match_results; DELETE FROM league_slots; DELETE FROM card_accumulation; DELETE FROM format_proposals; DELETE FROM format_votes; DELETE FROM tarkan_enrollment;`,
   );
+  db.run(`DELETE FROM world_state WHERE key IN ('cup_winner_id','afc_winner_id')`);
 
-  // League
+  // Leagues
   db.run(
     `INSERT OR IGNORE INTO leagues (id,name,country_id,level,reputation,continent,format,slots,active_config_id)
-     VALUES (1,'BRI Liga 1',1,1,72,'Asia','league',18,1)`,
+     VALUES (20,'AFC Champions League',0,0,90,'Asia','cup',8,NULL),
+            (30,'Liga U-21 Indonesia',1,1,40,'Asia','league',18,NULL),
+            (40,'Elite Pro Academy U-18',1,1,35,'Asia','league',18,NULL),
+            (45,'Elite Pro Academy U-15',1,1,30,'Asia','league',18,NULL),
+            (1,'BRI Liga 1',1,1,72,'Asia','league',18,1),
+            (2,'Pegadaian Liga 2',1,2,48,'Asia','league',18,2),
+            (5,'Liga 3 Indonesia',1,3,30,'Asia','league',18,NULL),
+            (3,'Malaysia Super League',2,1,76,'Asia','league',8,3),
+            (4,'Thai League 1',3,1,80,'Asia','league',8,4),
+            (6,'J1 League',4,1,88,'Asia','league',8,NULL),
+            (7,'K League 1',5,1,85,'Asia','league',8,NULL),
+            (8,'Saudi Pro League',6,1,90,'Asia','league',8,NULL),
+            (9,'Singapore Premier League',7,1,60,'Asia','league',8,NULL),
+            (11,'Premier League',8,1,96,'Europe','league',8,NULL),
+            (17,'EFL Championship',8,2,82,'Europe','league',8,NULL),
+            (18,'EFL League One',8,3,74,'Europe','league',8,NULL),
+            (19,'EFL League Two',8,4,66,'Europe','league',8,NULL),
+            (21,'National League',8,5,56,'Europe','league',8,NULL),
+            (31,'Premier League 2 (U-21)',8,1,55,'Europe','league',8,NULL),
+            (41,'Premier League U-18',8,1,50,'Europe','league',8,NULL),
+            (46,'Premier League U-15',8,1,45,'Europe','league',8,NULL),
+            (12,'La Liga',9,1,94,'Europe','league',8,NULL),
+            (22,'Segunda División',9,2,78,'Europe','league',8,NULL),
+            (23,'Primera Federación',9,3,70,'Europe','league',8,NULL),
+            (13,'Serie A',10,1,92,'Europe','league',8,NULL),
+            (24,'Serie B',10,2,78,'Europe','league',8,NULL),
+            (25,'Serie C',10,3,68,'Europe','league',8,NULL),
+            (14,'Bundesliga',11,1,92,'Europe','league',8,NULL),
+            (26,'2. Bundesliga',11,2,80,'Europe','league',8,NULL),
+            (27,'3. Liga',11,3,69,'Europe','league',8,NULL),
+            (28,'Ligue 1',14,1,90,'Europe','league',8,NULL),
+            (29,'Ligue 2',14,2,77,'Europe','league',8,NULL),
+            (15,'Eredivisie',12,1,86,'Europe','league',8,NULL),
+            (32,'Eerste Divisie',12,2,73,'Europe','league',8,NULL),
+            (33,'Primeira Liga',15,1,88,'Europe','league',8,NULL),
+            (34,'Liga Portugal 2',15,2,74,'Europe','league',8,NULL),
+            (35,'Süper Lig',16,1,86,'Europe','league',8,NULL),
+            (36,'TFF 1. Lig',16,2,72,'Europe','league',8,NULL),
+            (16,'V.League 1',13,1,65,'Asia','league',8,NULL),
+            (10,'Piala Indonesia',1,0,70,'Asia','cup',32,NULL)`,
   );
 
-  // Default Liga 1 competition config
+  // Default competition configs
   insertLiga1Config(db);
 
   let playerId = 1;
 
-  for (const club of LIGA1_CLUBS) {
-    // Insert club
-    db.run(
-      `INSERT OR IGNORE INTO clubs
-        (id,name,league_id,reputation,cash,fans,stadium_capacity,facilities_level,academy_level,
-         club_morale,wins,draws,losses,goals_for,goals_against,points,credit_score,
-         consecutive_missed_payments,bankrupt,slot_id,debt,monthly_income,monthly_costs)
-       VALUES (?,?,1,?,?,?,?,?,?,75,0,0,0,0,0,0,70,0,0,?,0,?,?)`,
-      [
-        club.id,
-        club.name,
-        club.reputation,
-        club.cash,
-        club.fans,
-        club.stadium_capacity,
-        club.facilities_level,
-        club.academy_level,
-        club.id, // slot_id = club.id for now
-        Math.round(club.cash * 0.08), // monthly_income ~8% cash
-        Math.round(club.cash * 0.06), // monthly_costs ~6% cash
-      ],
-    );
+  // nationality: 1=ID, 2=MY, 3=TH, 4=JP, 5=KR, 6=SA, 7=SG, 8=ENG, 9=ESP, 10=ITA, 11=GER, 12=NED, 13=VIE, 14=FRA, 15=POR, 16=TUR
+  const LEAGUE_NATIONALITY: Record<number, number> = {
+    1: 1, 2: 1, 5: 1, 3: 2, 4: 3, 6: 4, 7: 5, 8: 6, 9: 7,
+    11: 8, 17: 8, 18: 8, 19: 8, 21: 8,
+    12: 9, 22: 9, 23: 9,
+    13: 10, 24: 10, 25: 10,
+    14: 11, 26: 11, 27: 11,
+    28: 14, 29: 14,
+    15: 12, 32: 12,
+    33: 15, 34: 15,
+    35: 16, 36: 16,
+    16: 13,
+  };
 
-    // Insert league slot
-    db.run(
-      `INSERT OR IGNORE INTO league_slots (id,league_id,club_id,status,market_value) VALUES (?,1,?,'occupied',?)`,
-      [club.id, club.id, club.reputation * 75_000_000],
-    );
+  for (const [leagueId, clubList] of [
+    [1, LIGA1_CLUBS],
+    [2, LIGA2_CLUBS],
+    [5, LIGA3_CLUBS],
+    [3, MALAYSIA_CLUBS],
+    [4, THAILAND_CLUBS],
+    [6, JAPAN_CLUBS],
+    [7, KOREA_CLUBS],
+    [8, SAUDI_CLUBS],
+    [9, SINGAPORE_CLUBS],
+    [11, ENGLAND_CLUBS],
+    [17, CHAMPIONSHIP_CLUBS],
+    [18, LEAGUE_ONE_CLUBS],
+    [19, LEAGUE_TWO_CLUBS],
+    [21, NATIONAL_LEAGUE_CLUBS],
+    [12, SPAIN_CLUBS],
+    [22, SEGUNDA_CLUBS],
+    [23, PRIMERA_FED_CLUBS],
+    [13, ITALY_CLUBS],
+    [24, SERIE_B_CLUBS],
+    [25, SERIE_C_CLUBS],
+    [14, GERMANY_CLUBS],
+    [26, ZWEITE_BUNDESLIGA_CLUBS],
+    [27, DRITTE_LIGA_CLUBS],
+    [28, LIGUE1_CLUBS],
+    [29, LIGUE2_CLUBS],
+    [15, NETHERLANDS_CLUBS],
+    [32, EERSTE_DIVISIE_CLUBS],
+    [33, PRIMEIRA_LIGA_CLUBS],
+    [34, LIGA_PORTUGAL_2_CLUBS],
+    [35, SUPER_LIG_CLUBS],
+    [36, TFF_1_LIG_CLUBS],
+    [16, VIETNAM_CLUBS],
+  ] as const) {
+    for (const club of clubList) {
+      db.run(
+        `INSERT OR IGNORE INTO clubs
+          (id,name,league_id,reputation,cash,fans,stadium_capacity,facilities_level,academy_level,
+           club_morale,wins,draws,losses,goals_for,goals_against,points,credit_score,
+           consecutive_missed_payments,bankrupt,slot_id,debt,monthly_income,monthly_costs)
+         VALUES (?,?,?,?,?,?,?,?,?,75,0,0,0,0,0,0,70,0,0,?,0,?,?)`,
+        [
+          club.id,
+          club.name,
+          leagueId,
+          club.reputation,
+          club.cash,
+          club.fans,
+          club.stadium_capacity,
+          club.facilities_level,
+          club.academy_level,
+          club.id, // slot_id = club.id for now
+          Math.round(club.cash * 0.08), // monthly_income ~8% cash
+          Math.round(club.cash * 0.06), // monthly_costs ~6% cash
+        ],
+      );
 
-    // Generate squad
-    for (const pos of SQUAD_POSITIONS) {
-      const p = genPlayer(playerId++, club.id, club.reputation, pos, rng);
-      insertPlayerRow(db, p);
+      // Insert league slot
+      db.run(
+        `INSERT OR IGNORE INTO league_slots (id,league_id,club_id,status,market_value) VALUES (?,?,?,'occupied',?)`,
+        [club.id, leagueId, club.id, club.reputation * 75_000_000],
+      );
+
+      // Generate squad
+      const nationality = LEAGUE_NATIONALITY[leagueId] ?? 1;
+      for (const pos of SQUAD_POSITIONS) {
+        const p = genPlayer(playerId++, club.id, club.reputation, pos, rng, nationality);
+        insertPlayerRow(db, p);
+      }
     }
   }
 
   // Generate fixtures after all clubs inserted
-  const clubIds = LIGA1_CLUBS.map((c) => c.id);
-  generateFixtures(1, clubIds, 7, "liga1");
+  const clubIds1 = LIGA1_CLUBS.map((c) => c.id);
+  generateFixtures(1, clubIds1, 7, "liga1");
+  const clubIds2 = LIGA2_CLUBS.map((c) => c.id);
+  generateFixtures(2, clubIds2, 7, "liga2");
+  const clubIds5 = LIGA3_CLUBS.map((c) => c.id);
+  generateFixtures(5, clubIds5, 7, "liga3");
+  const clubIds3 = MALAYSIA_CLUBS.map((c) => c.id);
+  generateFixtures(3, clubIds3, 7, "msl", 14);
+  const clubIds4 = THAILAND_CLUBS.map((c) => c.id);
+  generateFixtures(4, clubIds4, 7, "tl1", 14);
+  const clubIds6 = JAPAN_CLUBS.map((c) => c.id);
+  generateFixtures(6, clubIds6, 7, "j1", 14);
+  const clubIds7 = KOREA_CLUBS.map((c) => c.id);
+  generateFixtures(7, clubIds7, 7, "k1", 14);
+  const clubIds8 = SAUDI_CLUBS.map((c) => c.id);
+  generateFixtures(8, clubIds8, 7, "spl_saudi", 14);
+  const clubIds9 = SINGAPORE_CLUBS.map((c) => c.id);
+  generateFixtures(9, clubIds9, 7, "spl_sg", 14);
+  const clubIds11 = ENGLAND_CLUBS.map((c) => c.id);
+  generateFixtures(11, clubIds11, 7, "epl", 14);
+  const clubIds17 = CHAMPIONSHIP_CLUBS.map((c) => c.id);
+  generateFixtures(17, clubIds17, 7, "efl", 14);
+  const clubIds18 = LEAGUE_ONE_CLUBS.map((c) => c.id);
+  generateFixtures(18, clubIds18, 7, "league_one", 14);
+  const clubIds19 = LEAGUE_TWO_CLUBS.map((c) => c.id);
+  generateFixtures(19, clubIds19, 7, "league_two", 14);
+  const clubIds21 = NATIONAL_LEAGUE_CLUBS.map((c) => c.id);
+  generateFixtures(21, clubIds21, 7, "nat_league", 14);
+  const clubIds12 = SPAIN_CLUBS.map((c) => c.id);
+  generateFixtures(12, clubIds12, 7, "laliga", 14);
+  const clubIds22 = SEGUNDA_CLUBS.map((c) => c.id);
+  generateFixtures(22, clubIds22, 7, "segunda", 14);
+  const clubIds23 = PRIMERA_FED_CLUBS.map((c) => c.id);
+  generateFixtures(23, clubIds23, 7, "primera_fed", 14);
+  const clubIds13 = ITALY_CLUBS.map((c) => c.id);
+  generateFixtures(13, clubIds13, 7, "seriea", 14);
+  const clubIds24 = SERIE_B_CLUBS.map((c) => c.id);
+  generateFixtures(24, clubIds24, 7, "serie_b", 14);
+  const clubIds25 = SERIE_C_CLUBS.map((c) => c.id);
+  generateFixtures(25, clubIds25, 7, "serie_c", 14);
+  const clubIds14 = GERMANY_CLUBS.map((c) => c.id);
+  generateFixtures(14, clubIds14, 7, "bundesliga", 14);
+  const clubIds26 = ZWEITE_BUNDESLIGA_CLUBS.map((c) => c.id);
+  generateFixtures(26, clubIds26, 7, "2_bundesliga", 14);
+  const clubIds27 = DRITTE_LIGA_CLUBS.map((c) => c.id);
+  generateFixtures(27, clubIds27, 7, "3_liga", 14);
+  const clubIds28 = LIGUE1_CLUBS.map((c) => c.id);
+  generateFixtures(28, clubIds28, 7, "ligue1", 14);
+  const clubIds29 = LIGUE2_CLUBS.map((c) => c.id);
+  generateFixtures(29, clubIds29, 7, "ligue2", 14);
+  const clubIds15 = NETHERLANDS_CLUBS.map((c) => c.id);
+  generateFixtures(15, clubIds15, 7, "eredivisie", 14);
+  const clubIds32 = EERSTE_DIVISIE_CLUBS.map((c) => c.id);
+  generateFixtures(32, clubIds32, 7, "eerste_divisie", 14);
+  const clubIds33 = PRIMEIRA_LIGA_CLUBS.map((c) => c.id);
+  generateFixtures(33, clubIds33, 7, "primeira_liga", 14);
+  const clubIds34 = LIGA_PORTUGAL_2_CLUBS.map((c) => c.id);
+  generateFixtures(34, clubIds34, 7, "liga_portugal_2", 14);
+  const clubIds35 = SUPER_LIG_CLUBS.map((c) => c.id);
+  generateFixtures(35, clubIds35, 7, "super_lig", 14);
+  const clubIds36 = TFF_1_LIG_CLUBS.map((c) => c.id);
+  generateFixtures(36, clubIds36, 7, "tff_1_lig", 14);
+  const clubIds16 = VIETNAM_CLUBS.map((c) => c.id);
+  generateFixtures(16, clubIds16, 7, "vleague", 14);
+
+  // Tarkan pyramid: 5 tiers × 24 clubs (IDs 1001–1120) + European Sunday Leagues (IDs 1201-1224)
+  generateTarkanLeagues(db, rng);
+
+  // Youth Pyramid (U-15, U-18, U-21)
+  const clubIds_u21 = LIGA1_CLUBS.map((c) => c.id);
+  generateFixtures(30, clubIds_u21, 11, "u21", 7);
+
+  const clubIds_epl_u21 = ENGLAND_CLUBS.map((c) => c.id);
+  generateFixtures(31, clubIds_epl_u21, 12, "epl_u21", 14);
+
+  const clubIds_u18 = LIGA1_CLUBS.map((c) => c.id);
+  generateFixtures(40, clubIds_u18, 13, "epa_u18", 7);
+
+  const clubIds_epl_u18 = ENGLAND_CLUBS.map((c) => c.id);
+  generateFixtures(41, clubIds_epl_u18, 14, "epl_u18", 14);
+
+  const clubIds_u15 = LIGA1_CLUBS.map((c) => c.id);
+  generateFixtures(45, clubIds_u15, 15, "epa_u15", 7);
+
+  const clubIds_epl_u15 = ENGLAND_CLUBS.map((c) => c.id);
+  generateFixtures(46, clubIds_epl_u15, 16, "epl_u15", 14);
+
+  // Piala Indonesia: 32-club single-elimination cup (Liga 1 × 18 + Liga 2 top 14)
+  generateCupR32(50);
+
+  // AFC Champions League: 8 clubs (top 4 Liga 1 + top 2 MSL + top 2 Thai), group stage starts day 60
+  generateAFCGroupStage();
 
   // ~30 free agents
   for (let i = 0; i < 30; i++) {
@@ -381,6 +643,39 @@ function insertLiga1Config(db: ReturnType<typeof getDB>): void {
     },
   ]);
 
+  const stages2 = JSON.stringify([
+    {
+      id: "league",
+      name: "Pegadaian Liga 2",
+      format: "round_robin",
+      num_groups: 1,
+      legs: 2,
+      num_teams: 18,
+      title_from_position: 1,
+      promotion_spots: 3,
+      relegation_spots: 0,
+      tiebreaker: ["points", "gd", "gf", "h2h_points", "h2h_gd", "h2h_gf", "lots"],
+      reset_card_accumulation: false,
+    },
+  ]);
+
+  const stagesAsean = (name: string) =>
+    JSON.stringify([
+      {
+        id: "league",
+        name,
+        format: "round_robin",
+        num_groups: 1,
+        legs: 2,
+        num_teams: 8,
+        title_from_position: 1,
+        promotion_spots: 0,
+        relegation_spots: 0,
+        tiebreaker: ["points", "gd", "gf", "h2h_points", "h2h_gd", "h2h_gf", "lots"],
+        reset_card_accumulation: false,
+      },
+    ]);
+
   const foreignRules = JSON.stringify({
     squad_limit: 8,
     matchday_limit: 5,
@@ -389,6 +684,19 @@ function insertLiga1Config(db: ReturnType<typeof getDB>): void {
     special_slots: [{ name: "AFC", extra_count: 1, criteria: { confederation: "AFC" } }],
     local_starting_min: 0,
     u23_local_min_field: 0,
+    naturalized_counts_as: "domestic",
+    exempt_confederations: [],
+    exempt_regions: [],
+  });
+
+  const foreignRules2 = JSON.stringify({
+    squad_limit: 3,
+    matchday_limit: 3,
+    field_limit: 3,
+    starting_limit: null,
+    special_slots: [],
+    local_starting_min: 8,
+    u23_local_min_field: 1,
     naturalized_counts_as: "domestic",
     exempt_confederations: [],
     exempt_regions: [],
@@ -419,8 +727,28 @@ function insertLiga1Config(db: ReturnType<typeof getDB>): void {
     `INSERT OR IGNORE INTO competition_configs
       (id,league_id,season_apply,name,stages,foreign_rules,card_rules,awards,
        max_squad_size,max_matchday_squad,proposed_by,proposer_type,status,created_day)
-     VALUES (1,1,1,'BRI Liga 1',?,?,?,?,25,18,NULL,'system','active',0)`,
-    [stages, foreignRules, cardRules, awards],
+     VALUES (1,1,1,'BRI Liga 1',?,?,?,?,25,18,NULL,'system','active',0),
+            (2,2,1,'Pegadaian Liga 2',?,?,?,?,25,18,NULL,'system','active',0),
+            (3,3,1,'Malaysia Super League',?,?,?,?,25,18,NULL,'system','active',0),
+            (4,4,1,'Thai League 1',?,?,?,?,25,18,NULL,'system','active',0)`,
+    [
+      stages,
+      foreignRules,
+      cardRules,
+      awards,
+      stages2,
+      foreignRules2,
+      cardRules,
+      awards,
+      stagesAsean("Malaysia Super League"),
+      foreignRules,
+      cardRules,
+      awards,
+      stagesAsean("Thai League 1"),
+      foreignRules,
+      cardRules,
+      awards,
+    ],
   );
 }
 
@@ -474,4 +802,165 @@ export function generateFixtures(
       );
     });
   });
+}
+
+// ─── Tarkan pyramid ───────────────────────────────────────────────────────────
+
+const TARKAN_AREAS = [
+  "Bandung",
+  "Surabaya",
+  "Medan",
+  "Semarang",
+  "Makassar",
+  "Palembang",
+  "Denpasar",
+  "Yogyakarta",
+  "Malang",
+  "Bogor",
+  "Bekasi",
+  "Depok",
+  "Tangerang",
+  "Batam",
+  "Pekanbaru",
+  "Banjarmasin",
+  "Samarinda",
+  "Pontianak",
+  "Manado",
+  "Kupang",
+  "Jayapura",
+  "Mataram",
+  "Ambon",
+  "Ternate",
+  "Tasikmalaya",
+  "Cirebon",
+  "Sukabumi",
+  "Purwokerto",
+  "Madiun",
+  "Kediri",
+  "Jember",
+  "Probolinggo",
+  "Blitar",
+  "Mojokerto",
+  "Tulungagung",
+  "Pasuruan",
+  "Banyuwangi",
+  "Situbondo",
+  "Lumajang",
+  "Bondowoso",
+  "Lamongan",
+  "Tuban",
+  "Bojonegoro",
+  "Magetan",
+  "Ngawi",
+  "Ponorogo",
+  "Pacitan",
+  "Trenggalek",
+];
+const TARKAN_SUFFIX = ["Putra", "Muda", "Jaya", "United", "FC", "Bintang", "Garuda", "Sakti"];
+
+function generateTarkanLeagues(db: ReturnType<typeof getDB>, rng: () => number): void {
+  const TIERS = [
+    { id: 101, name: "Tarkan Divisi 1", rep: [28, 38] },
+    { id: 102, name: "Tarkan Divisi 2", rep: [20, 30] },
+    { id: 103, name: "Tarkan Divisi 3", rep: [14, 24] },
+    { id: 104, name: "Tarkan Divisi 4", rep: [10, 18] },
+    { id: 105, name: "Tarkan Divisi 5", rep: [5, 12] },
+  ];
+
+  // Insert Tarkan leagues
+  for (const t of TIERS) {
+    db.run(
+      `INSERT OR IGNORE INTO leagues (id,name,country_id,level,reputation,continent,format,slots,type)
+       VALUES (?,?,1,?,?,  'Asia','league',24,'tarkan')`,
+      [t.id, t.name, t.id - 98, Math.round((t.rep[0] + t.rep[1]) / 2)],
+    );
+  }
+
+  let clubId = 1001;
+  const usedNames = new Set<string>();
+
+  for (const tier of TIERS) {
+    const tierClubIds: number[] = [];
+
+    for (let i = 0; i < 24; i++) {
+      // Pick unique name
+      let clubName = "";
+      let attempts = 0;
+      do {
+        const area = TARKAN_AREAS[Math.floor(rng() * TARKAN_AREAS.length)];
+        const suffix = TARKAN_SUFFIX[Math.floor(rng() * TARKAN_SUFFIX.length)];
+        clubName = `${area} ${suffix}`;
+        attempts++;
+      } while (usedNames.has(clubName) && attempts < 50);
+      usedNames.add(clubName);
+
+      const rep = tier.rep[0] + Math.floor(rng() * (tier.rep[1] - tier.rep[0] + 1));
+      db.run(
+        `INSERT OR IGNORE INTO clubs
+          (id,name,league_id,reputation,cash,fans,stadium_capacity,facilities_level,academy_level,
+           club_morale,wins,draws,losses,goals_for,goals_against,points,credit_score,
+           consecutive_missed_payments,bankrupt,slot_id,debt,monthly_income,monthly_costs)
+         VALUES (?,?,?,?,500000000,500,2000,1,0,75,0,0,0,0,0,0,60,0,0,?,0,10000000,8000000)`,
+        [clubId, clubName, tier.id, rep, clubId],
+      );
+
+      tierClubIds.push(clubId);
+      clubId++;
+    }
+
+    // Single round-robin: 23 matchdays, every 5 days starting day 9
+    generateFixtures(tier.id, tierClubIds, 9, `tarkan_${tier.id - 100}`, 5);
+  }
+
+  // European Sunday Leagues (Tier 6 grassroots amateur, IDs 1201-1224)
+  const SUNDAY_TIERS = [
+    {
+      id: 106,
+      name: "Sunday League North (Eropa)",
+      clubs: [
+        "Camden Town Sunday", "Clapham Rovers", "Hackney Marshes", "Brixton Casuals",
+        "Islington Athletic", "Kreuzberg Kickers", "Altona 93 Amateure", "De Pijp Amsterdam",
+        "Jordaan Boys Sunday", "Rotterdam Haven", "Salford Bohemians", "Sheffield Sunday Vets",
+      ],
+      startId: 1201,
+      countryId: 8,
+    },
+    {
+      id: 107,
+      name: "Sunday League South (Eropa)",
+      clubs: [
+        "Gracia Barcelona", "Malasana Madrid", "Lavapies Athletic", "Trastevere Amatori",
+        "San Lorenzo Calcio", "Navigli Milano", "Quartier Latin Paris", "Belleville Amateurs",
+        "Vieux-Port Marseille", "Alfama Lisboa", "Bairro Alto Casuals", "Ribeira Porto Sunday",
+      ],
+      startId: 1213,
+      countryId: 9,
+    },
+  ];
+
+  for (const st of SUNDAY_TIERS) {
+    db.run(
+      `INSERT OR IGNORE INTO leagues (id,name,country_id,level,reputation,continent,format,slots,type)
+       VALUES (?,?,? ,6,25,'Europe','league',12,'tarkan')`,
+      [st.id, st.name, st.countryId],
+    );
+
+    const sundayClubIds: number[] = [];
+    for (let i = 0; i < st.clubs.length; i++) {
+      const cId = st.startId + i;
+      const cName = st.clubs[i];
+      const rep = 20 + Math.floor(rng() * 10);
+      db.run(
+        `INSERT OR IGNORE INTO clubs
+          (id,name,league_id,reputation,cash,fans,stadium_capacity,facilities_level,academy_level,
+           club_morale,wins,draws,losses,goals_for,goals_against,points,credit_score,
+           consecutive_missed_payments,bankrupt,slot_id,debt,monthly_income,monthly_costs)
+         VALUES (?,?,?,?,1000000000,1500,3000,1,0,75,0,0,0,0,0,0,60,0,0,?,0,20000000,15000000)`,
+        [cId, cName, st.id, rep, cId],
+      );
+      sundayClubIds.push(cId);
+    }
+    // Single round-robin: 11 matchdays, every 7 days starting day 8
+    generateFixtures(st.id, sundayClubIds, 8, `sunday_${st.id === 106 ? "north" : "south"}`, 7);
+  }
 }

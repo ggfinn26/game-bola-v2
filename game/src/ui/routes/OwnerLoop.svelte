@@ -15,6 +15,7 @@
     championshipSeries: boolean;
     onadvance: (watch?: boolean) => void;
     onloan: (amount: number) => void;
+    onloanshark: (amount: number) => void;
     onrepay: (amount: number) => void;
     oninject: (amount: number) => void;
     ondividend: (amount: number) => void;
@@ -37,6 +38,7 @@
     championshipSeries,
     onadvance,
     onloan,
+    onloanshark,
     onrepay,
     oninject,
     ondividend,
@@ -281,6 +283,13 @@
                 disabled={club.bankrupt || club.credit_score <= 0}
               >
                 🏦 Pinjam Bank Rp 5M
+              </button>
+              <button
+                class="btn-red"
+                onclick={() => onloanshark(3_000_000_000)}
+                disabled={club.bankrupt}
+              >
+                🦈 Pinjam Rentenir Rp 3M (8%/bln)
               </button>
               <button
                 onclick={() => onrepay(2_000_000_000)}

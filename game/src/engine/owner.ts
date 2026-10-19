@@ -49,6 +49,7 @@ export interface SlotMarketRow {
 
 // Monthly interest rate by credit score (SLOT-LIGA-BANKRUPTCY.md §4)
 export function getMonthlyInterestRate(creditScore: number): number {
+  if (creditScore <= 0) return 0.08; // Loan Shark flat 8.0%/month
   if (creditScore >= 80) return 0.008;
   if (creditScore >= 60) return 0.012;
   if (creditScore >= 40) return 0.02;
@@ -266,6 +267,23 @@ export function takeBankLoan(ownerId: number, amount: number): { ok: boolean; su
   return {
     ok: true,
     summary: `🏦 Pinjaman bank Rp ${(amount / 1_000_000_000).toFixed(1)}M cair (Bunga ${ratePct}%/bln). Kas klub bertambah!`,
+  };
+}
+
+export function takeLoanShark(ownerId: number, amount: number): { ok: boolean; summary: string } {
+  const db = getDB();
+  const state = getOwnerState(ownerId);
+  if (!state || !state.club) return { ok: false, summary: "Kamu belum memiliki klub aktif." };
+  const c = state.club;
+  if (c.bankrupt) return { ok: false, summary: "❌ Klub sudah bangkrut!" };
+
+  db.run(
+    `UPDATE clubs SET cash = cash + ?, debt = debt + ?, credit_score = 0, consecutive_missed_payments = 0, club_morale = MAX(15, club_morale - 5) WHERE id = ?`,
+    [amount, amount, c.id],
+  );
+  return {
+    ok: true,
+    summary: `🦈 Pinjaman Rentenir Ilegal Rp ${(amount / 1_000_000_000).toFixed(1)}M cair instan (Bunga 8.0%/bln, Skor Kredit = 0). Awas: gagal bayar memicu teror & kasus hukum!`,
   };
 }
 
@@ -609,6 +627,16 @@ export function tickClubFinances(ownerId: number, daysDelta: number): string | n
 
   if (missed >= 3) {
     messages.push(triggerClubBankruptcy(c.id, ownerId));
+  } else if (newCash < 0 && c.credit_score === 0) {
+    if (missed === 1) {
+      messages.push(
+        `🦈 TEROR RENTENIR (Tunggakan 1/2): Penagih utang mengancam manajemen ${c.name}! Segera suntik kas sebelum dipaksa terlibat sindikat skor / pidana.`,
+      );
+    } else if (missed === 2) {
+      messages.push(
+        `🦈 EKSEKUSI RENTENIR (Tunggakan 2/2): Karena gagal bayar, sindikat rentenir memaksa ${c.name} mengalah & aliran dana ilegal bocor ke polisi!`,
+      );
+    }
   } else if (newCash < 0) {
     messages.push(
       `⚠️ PERINGATAN KEUANGAN: Kas ${c.name} defisit! Tunggakan ke-${missed}/3 sebelum klub disita & bangkrut.`,

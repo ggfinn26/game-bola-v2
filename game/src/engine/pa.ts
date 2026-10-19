@@ -1,4 +1,4 @@
-import type { Player, Position } from "../types/index.js";
+import type { Player, Position, Trait } from "../types/index.js";
 
 // ─── CA v3 Calculation (§ PA/CA Engine v3) ────────────────────────────────────
 
@@ -24,13 +24,7 @@ export const OUTFIELD_ATTRS = [
   "jumping",
 ] as const;
 
-export const GK_ATTRS = [
-  "reflexes",
-  "handling",
-  "gk_positioning",
-  "one_on_ones",
-  "command",
-] as const;
+export const GK_ATTRS = ["reflexes", "handling", "gk_positioning", "one_on_ones", "command"] as const;
 
 const GK_SHARED_OUTFIELD = [
   "decisions",
@@ -175,50 +169,83 @@ export interface PAUpdateResult {
 }
 
 export function recalcPACA(player: Player, totalMatchesThisSeason: number, trainingQuality: number): PAUpdateResult {
+  const has = (t: Trait) => player.traits.includes(t);
+  const maxGrowthAge = has("late_bloomer") ? 29 : 26;
+
   const perfScore = calcPerformanceScore(player, totalMatchesThisSeason);
   const expectedPerf = player.ca / Math.max(player.pa, 1);
 
-  let paDelta = 0;
+  let pa_delta = 0;
   if (perfScore > expectedPerf + 0.1) {
-    paDelta = randInt(5, 15);
+    pa_delta = randInt(5, 15);
   } else if (perfScore < expectedPerf - 0.15) {
-    paDelta = -randInt(5, 10);
+    pa_delta = -randInt(5, 10);
   }
 
   // Age multiplier applies only to performance delta (not decay)
-  paDelta = Math.round(paDelta * ageMultiplier(player.age));
+  const ageMult = has("late_bloomer") && player.age <= 29 ? Math.max(1.0, ageMultiplier(player.age)) : ageMultiplier(player.age);
+  pa_delta = Math.round(pa_delta * ageMult);
 
-  // late_bloomer overrides age penalty
-  if (player.traits.includes("late_bloomer") && player.age >= 28) {
-    paDelta = Math.round(paDelta * 1.2);
-    if (paDelta < 0) paDelta = 0;
+  if (player.age > maxGrowthAge && pa_delta > 0) {
+    pa_delta = 0;
   }
 
-  // determination prevents PA drop during injury
-  if (player.injured && player.traits.includes("determination")) {
-    paDelta = Math.max(0, paDelta);
+  // ambitious: +1 extra pa_delta when season rating >= 7.0
+  if (has("ambitious") && player.rating >= 7.0) {
+    pa_delta += 1;
   }
 
-  const ceiling = player.pa_ceiling ?? 100;
-  let newPA = clamp(player.pa + paDelta, player.ca, ceiling);
+  // content: caps pa_delta at +1 max
+  if (has("content")) {
+    pa_delta = Math.min(1, pa_delta);
+  }
+
+  // fragile_mentally: doubles negative pa_delta when rating < 6.3
+  if (has("fragile_mentally") && player.rating < 6.3 && pa_delta < 0) {
+    pa_delta *= 2;
+  }
 
   // Inactivity decay — independent of age mult and performance delta
   if (player.matches < 5) {
-    newPA = Math.max(player.ca, newPA - randInt(10, 25));
+    pa_delta -= randInt(10, 25);
+  }
+
+  // determination: prevents negative pa_delta when injured or low matches
+  if (has("determination") && (player.injured || player.matches < 10)) {
+    pa_delta = Math.max(0, pa_delta);
   }
 
   // Prison decay — independent, applied last
   if (player.in_prison) {
-    newPA = Math.max(player.ca, newPA - randInt(15, 40));
+    pa_delta -= randInt(15, 40);
   }
 
+  let ceiling = player.pa_ceiling ?? 100;
+  if (has("wonderkid") && player.age <= 21) ceiling = Math.min(100, ceiling + 10);
+  const newPA = clamp(player.pa + pa_delta, player.ca, ceiling);
+
   // CA update: grows from match time + training, decays with age
-  const quickLearnerBonus = player.traits.includes("quick_learner") ? 0.15 : 0;
-  let caDelta = 0;
+  let effectiveTraining = trainingQuality;
+  if (has("professional")) effectiveTraining = Math.min(100, effectiveTraining + 12);
+  if (has("lazy")) effectiveTraining = Math.max(0, effectiveTraining - 15);
+
+  let ca_gain = 0;
   const gamesRatio = player.matches / Math.max(1, totalMatchesThisSeason);
-  if (gamesRatio > 0.6 && trainingQuality > 60) {
-    caDelta = randInt(0, 10) + Math.round(quickLearnerBonus * 10);
+  if (player.age <= maxGrowthAge && gamesRatio > 0.6 && effectiveTraining > 60) {
+    ca_gain = randInt(0, 10);
   }
+  if (has("professional") && player.age < 27) {
+    ca_gain = Math.max(0.5, ca_gain);
+  }
+
+  if (ca_gain > 0) {
+    if (has("quick_learner")) ca_gain *= 1.25;
+    if (has("wonderkid") && player.age <= 20) ca_gain *= 1.3;
+    if (has("lazy")) ca_gain *= 0.7;
+    if (has("content")) ca_gain *= 0.85;
+  }
+
+  let caDelta = Math.round(ca_gain);
   if (player.age > 30) {
     caDelta -= randInt(0, 5);
   }
