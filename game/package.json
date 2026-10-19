@@ -17,7 +17,11 @@
     "test:p2:match": "npx vite-node tests/p2_match.ts",
     "test:p2:injury": "npx vite-node tests/p2_injury.ts",
     "test:p2:cup": "npx vite-node tests/p2_cup.ts",
-    "test:p2": "npx vite-node tests/p2_match.ts && npx vite-node tests/p2_injury.ts && npx vite-node tests/p2_cup.ts"
+    "test:p2": "npx vite-node tests/p2_match.ts && npx vite-node tests/p2_injury.ts && npx vite-node tests/p2_cup.ts",
+    "test:p3:worldai": "npx vite-node tests/p3_worldai.ts",
+    "test:p3:save": "npx vite-node tests/p3_save.ts",
+    "test:p3": "npx vite-node tests/p3_worldai.ts && npx vite-node tests/p3_save.ts",
+    "test:all": "npx vite-node tests/p1_pa.ts && npx vite-node tests/p1_legal.ts && npx vite-node tests/p1_transfers.ts && npx vite-node tests/p2_match.ts && npx vite-node tests/p2_injury.ts && npx vite-node tests/p2_cup.ts && npx vite-node tests/p3_worldai.ts && npx vite-node tests/p3_save.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
