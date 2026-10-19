@@ -41,6 +41,7 @@ import {
   SQUAD_POSITIONS,
 } from "../data/indonesia.js";
 import type { Position, Trait } from "../types/index.js";
+import { EXCLUSIVE_TRAITS } from "../types/index.js";
 
 // ponytail: seeded lcg so world is reproducible per seed
 function makeLCG(seed: number) {
@@ -87,11 +88,19 @@ const ALL_TRAITS: Trait[] = [
 
 function genTraits(rng: () => number): Trait[] {
   const count = rng() < 0.3 ? 0 : rng() < 0.6 ? 1 : rng() < 0.85 ? 2 : 3;
-  const pool = [...ALL_TRAITS];
+  let pool = [...ALL_TRAITS];
   const traits: Trait[] = [];
   for (let i = 0; i < count; i++) {
+    if (pool.length === 0) break;
     const idx = Math.floor(rng() * pool.length);
-    traits.push(pool.splice(idx, 1)[0]);
+    const picked = pool.splice(idx, 1)[0];
+    traits.push(picked);
+    // Remove the exclusive opposite so it can never be picked next
+    const opposite = EXCLUSIVE_TRAITS.find(([a, b]) => a === picked || b === picked);
+    if (opposite) {
+      const opp = opposite[0] === picked ? opposite[1] : opposite[0];
+      pool = pool.filter((t) => t !== opp);
+    }
   }
   return traits;
 }
@@ -440,15 +449,37 @@ export function generateWorld(seed = 42): void {
 
   // nationality: 1=ID, 2=MY, 3=TH, 4=JP, 5=KR, 6=SA, 7=SG, 8=ENG, 9=ESP, 10=ITA, 11=GER, 12=NED, 13=VIE, 14=FRA, 15=POR, 16=TUR
   const LEAGUE_NATIONALITY: Record<number, number> = {
-    1: 1, 2: 1, 5: 1, 3: 2, 4: 3, 6: 4, 7: 5, 8: 6, 9: 7,
-    11: 8, 17: 8, 18: 8, 19: 8, 21: 8,
-    12: 9, 22: 9, 23: 9,
-    13: 10, 24: 10, 25: 10,
-    14: 11, 26: 11, 27: 11,
-    28: 14, 29: 14,
-    15: 12, 32: 12,
-    33: 15, 34: 15,
-    35: 16, 36: 16,
+    1: 1,
+    2: 1,
+    5: 1,
+    3: 2,
+    4: 3,
+    6: 4,
+    7: 5,
+    8: 6,
+    9: 7,
+    11: 8,
+    17: 8,
+    18: 8,
+    19: 8,
+    21: 8,
+    12: 9,
+    22: 9,
+    23: 9,
+    13: 10,
+    24: 10,
+    25: 10,
+    14: 11,
+    26: 11,
+    27: 11,
+    28: 14,
+    29: 14,
+    15: 12,
+    32: 12,
+    33: 15,
+    34: 15,
+    35: 16,
+    36: 16,
     16: 13,
   };
 
@@ -918,9 +949,18 @@ function generateTarkanLeagues(db: ReturnType<typeof getDB>, rng: () => number):
       id: 106,
       name: "Sunday League North (Eropa)",
       clubs: [
-        "Camden Town Sunday", "Clapham Rovers", "Hackney Marshes", "Brixton Casuals",
-        "Islington Athletic", "Kreuzberg Kickers", "Altona 93 Amateure", "De Pijp Amsterdam",
-        "Jordaan Boys Sunday", "Rotterdam Haven", "Salford Bohemians", "Sheffield Sunday Vets",
+        "Camden Town Sunday",
+        "Clapham Rovers",
+        "Hackney Marshes",
+        "Brixton Casuals",
+        "Islington Athletic",
+        "Kreuzberg Kickers",
+        "Altona 93 Amateure",
+        "De Pijp Amsterdam",
+        "Jordaan Boys Sunday",
+        "Rotterdam Haven",
+        "Salford Bohemians",
+        "Sheffield Sunday Vets",
       ],
       startId: 1201,
       countryId: 8,
@@ -929,9 +969,18 @@ function generateTarkanLeagues(db: ReturnType<typeof getDB>, rng: () => number):
       id: 107,
       name: "Sunday League South (Eropa)",
       clubs: [
-        "Gracia Barcelona", "Malasana Madrid", "Lavapies Athletic", "Trastevere Amatori",
-        "San Lorenzo Calcio", "Navigli Milano", "Quartier Latin Paris", "Belleville Amateurs",
-        "Vieux-Port Marseille", "Alfama Lisboa", "Bairro Alto Casuals", "Ribeira Porto Sunday",
+        "Gracia Barcelona",
+        "Malasana Madrid",
+        "Lavapies Athletic",
+        "Trastevere Amatori",
+        "San Lorenzo Calcio",
+        "Navigli Milano",
+        "Quartier Latin Paris",
+        "Belleville Amateurs",
+        "Vieux-Port Marseille",
+        "Alfama Lisboa",
+        "Bairro Alto Casuals",
+        "Ribeira Porto Sunday",
       ],
       startId: 1213,
       countryId: 9,

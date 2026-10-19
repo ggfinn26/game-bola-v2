@@ -8,7 +8,16 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
-    "test": "npx vite-node tests/check_leagues.ts"
+    "test": "npx vite-node tests/check_leagues.ts",
+    "test:retirement": "npx vite-node tests/check_retirement.ts",
+    "test:p1:pa": "npx vite-node tests/p1_pa.ts",
+    "test:p1:legal": "npx vite-node tests/p1_legal.ts",
+    "test:p1:transfers": "npx vite-node tests/p1_transfers.ts",
+    "test:p1": "npx vite-node tests/p1_pa.ts && npx vite-node tests/p1_legal.ts && npx vite-node tests/p1_transfers.ts",
+    "test:p2:match": "npx vite-node tests/p2_match.ts",
+    "test:p2:injury": "npx vite-node tests/p2_injury.ts",
+    "test:p2:cup": "npx vite-node tests/p2_cup.ts",
+    "test:p2": "npx vite-node tests/p2_match.ts && npx vite-node tests/p2_injury.ts && npx vite-node tests/p2_cup.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
