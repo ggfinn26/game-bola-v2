@@ -1,0 +1,10 @@
+# APK reference files
+*.apk
+*.xapk
+*.zip
+*_decoded/
+*_extracted/
+
+# Tools & temp
+.playwright-mcp/
+tes/
