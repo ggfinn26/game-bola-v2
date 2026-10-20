@@ -22,7 +22,11 @@
     "test:p3:save": "npx vite-node tests/p3_save.ts",
     "test:p3": "npx vite-node tests/p3_worldai.ts && npx vite-node tests/p3_save.ts",
     "test:p4": "npx vite-node tests/p4_dynasty.ts",
-    "test:all": "npx vite-node tests/p1_pa.ts && npx vite-node tests/p1_legal.ts && npx vite-node tests/p1_transfers.ts && npx vite-node tests/p2_match.ts && npx vite-node tests/p2_injury.ts && npx vite-node tests/p2_cup.ts && npx vite-node tests/p3_worldai.ts && npx vite-node tests/p3_save.ts && npx vite-node tests/p4_dynasty.ts"
+    "test:p5:events": "npx vite-node tests/p5_events.ts",
+    "test:p5:timnas": "npx vite-node tests/p5_timnas_afc.ts",
+    "test:p5:tarkan": "npx vite-node tests/p5_tarkan_owner_agent.ts",
+    "test:p5": "npx vite-node tests/p5_events.ts && npx vite-node tests/p5_timnas_afc.ts && npx vite-node tests/p5_tarkan_owner_agent.ts",
+    "test:all": "npx vite-node tests/p1_pa.ts && npx vite-node tests/p1_legal.ts && npx vite-node tests/p1_transfers.ts && npx vite-node tests/p2_match.ts && npx vite-node tests/p2_injury.ts && npx vite-node tests/p2_cup.ts && npx vite-node tests/p3_worldai.ts && npx vite-node tests/p3_save.ts && npx vite-node tests/p4_dynasty.ts && npx vite-node tests/p5_events.ts && npx vite-node tests/p5_timnas_afc.ts && npx vite-node tests/p5_tarkan_owner_agent.ts"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.0",
