@@ -556,8 +556,8 @@
     outline: none;
     transition: border-color 0.15s;
   }
-  input:focus, select:focus { border-color: var(--green); }
-  select option { background: var(--surface2); }
+  input:focus, select:focus { border-color: var(--green); outline: none; }
+  select option { background: var(--surface2); color: var(--text); }
   input[type="range"] {
     flex: 1; padding: 0; border: none; background: none;
     accent-color: var(--green); cursor: pointer;

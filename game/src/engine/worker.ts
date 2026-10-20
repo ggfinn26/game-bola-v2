@@ -198,54 +198,56 @@ self.onmessage = async (e: MessageEvent<WorkerMessage>) => {
       break;
     }
 
-    case "NEW_GAME": {
-      generateWorld(msg.seed ?? 42);
-      eventCounts = {};
-      egoCareerAwards = 0;
-      worldState = createWorld(msg.mode as import("../types/index.js").GameMode, msg.characterId, msg.startAge);
-      const db = getDB();
-      const clubs = db.exec("SELECT id,name,reputation,league_id FROM clubs ORDER BY reputation DESC")[0]?.values ?? [];
-      const leagues = db.exec("SELECT id,name FROM leagues ORDER BY id")[0]?.values ?? [];
-      self.postMessage({ type: "WORLD_STATE", state: worldState, clubs, leagues });
-      break;
-    }
+    case "NEW_GAME":
+      {
+        generateWorld(msg.seed ?? 42);
+        eventCounts = {};
+        egoCareerAwards = 0;
+        worldState = createWorld(msg.mode as import("../types/index.js").GameMode, msg.characterId, msg.startAge);
+        const db = getDB();
+        const clubs =
+          db.exec("SELECT id,name,reputation,league_id FROM clubs ORDER BY reputation DESC")[0]?.values ?? [];
+        const leagues = db.exec("SELECT id,name FROM leagues ORDER BY id")[0]?.values ?? [];
+        self.postMessage({ type: "WORLD_STATE", state: worldState, clubs, leagues });
+        break;
+      }
 
-function getAllLeaguesStandings(): Record<number, StandingRow[]> {
-  return {
-    1: getStandings(1),
-    2: getStandings(2),
-    5: getStandings(5),
-    3: getStandings(3),
-    4: getStandings(4),
-    6: getStandings(6),
-    7: getStandings(7),
-    8: getStandings(8),
-    9: getStandings(9),
-    11: getStandings(11),
-    17: getStandings(17),
-    18: getStandings(18),
-    19: getStandings(19),
-    21: getStandings(21),
-    12: getStandings(12),
-    22: getStandings(22),
-    23: getStandings(23),
-    13: getStandings(13),
-    24: getStandings(24),
-    25: getStandings(25),
-    14: getStandings(14),
-    26: getStandings(26),
-    27: getStandings(27),
-    28: getStandings(28),
-    29: getStandings(29),
-    15: getStandings(15),
-    32: getStandings(32),
-    33: getStandings(33),
-    34: getStandings(34),
-    35: getStandings(35),
-    36: getStandings(36),
-    16: getStandings(16),
-  };
-}
+      function getAllLeaguesStandings(): Record<number, StandingRow[]> {
+        return {
+          1: getStandings(1),
+          2: getStandings(2),
+          5: getStandings(5),
+          3: getStandings(3),
+          4: getStandings(4),
+          6: getStandings(6),
+          7: getStandings(7),
+          8: getStandings(8),
+          9: getStandings(9),
+          11: getStandings(11),
+          17: getStandings(17),
+          18: getStandings(18),
+          19: getStandings(19),
+          21: getStandings(21),
+          12: getStandings(12),
+          22: getStandings(22),
+          23: getStandings(23),
+          13: getStandings(13),
+          24: getStandings(24),
+          25: getStandings(25),
+          14: getStandings(14),
+          26: getStandings(26),
+          27: getStandings(27),
+          28: getStandings(28),
+          29: getStandings(29),
+          15: getStandings(15),
+          32: getStandings(32),
+          33: getStandings(33),
+          34: getStandings(34),
+          35: getStandings(35),
+          36: getStandings(36),
+          16: getStandings(16),
+        };
+      }
 
     case "START_CAREER": {
       eventCounts = {};
@@ -466,12 +468,12 @@ function getAllLeaguesStandings(): Record<number, StandingRow[]> {
       const cupMsg = checkCupProgression();
       const afcMsg = checkAFCProgression();
       const timnasMsg = processTimnasCalendar(next, egoId);
-      const {
-        results: matchResults,
-        watchedSteps,
-        watchedHomeName,
-        watchedAwayName,
-      } = processMatchDay(next, egoId, msg.watch ? msg.playerClubId : 0, worldState.season);
+      const { results: matchResults, watchedWeights } = processMatchDay(
+        next,
+        egoId,
+        msg.watch ? msg.playerClubId : 0,
+        worldState.season,
+      );
       const egoPlayer = getPlayer(egoId);
 
       if (egoPlayer) {
@@ -527,9 +529,7 @@ function getAllLeaguesStandings(): Record<number, StandingRow[]> {
         event_type: matchResults.length > 0 ? "match" : "idle",
         match_results: matchResults,
         player_match: playerMatch,
-        watched_steps: watchedSteps,
-        watched_home_name: watchedHomeName,
-        watched_away_name: watchedAwayName,
+        watched_weights: watchedWeights,
         upcoming,
         standings: getStandings(1),
         standings2: getStandings(2),

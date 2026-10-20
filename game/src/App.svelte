@@ -8,7 +8,7 @@
     ClubStaffLevels,
     TransferTarget,
   } from "./engine/scheduler.js";
-  import type { MatchStep } from "./engine/match.js";
+  import type { MatchWeights } from "./engine/match.js";
   import type { TransferOffer } from "./engine/transfers.js";
   import type { LeagueLeaders, CareerSeasonRow } from "./engine/awards.js";
   import {
@@ -86,9 +86,7 @@
   let transferOffers = $state<TransferOffer[] | null>(null);
   let lastEventSummary = $state<string | null>(null);
   let playerMatch = $state<MatchResult | null>(null);
-  let watchedSteps = $state<MatchStep[] | null>(null);
-  let watchedHomeName = $state("");
-  let watchedAwayName = $state("");
+  let watchedWeights = $state<MatchWeights | null>(null);
   let upcoming = $state<UpcomingFixture[]>([]);
   let standings = $state<StandingRow[]>([]);
   let standings2 = $state<StandingRow[]>([]);
@@ -251,9 +249,7 @@
         if (msg.transfer_offers) transferOffers = msg.transfer_offers;
         lastEventSummary = msg.season_summary ?? null;
         playerMatch = msg.player_match ?? null;
-        watchedSteps = msg.watched_steps ?? null;
-        watchedHomeName = msg.watched_home_name ?? "";
-        watchedAwayName = msg.watched_away_name ?? "";
+        watchedWeights = msg.watched_weights ?? null;
         upcoming = msg.upcoming ?? [];
         standings = msg.standings ?? standings;
         standings2 = msg.standings2 ?? standings2;
@@ -735,30 +731,35 @@
 
   {:else if screen === "title"}
     <div class="title-screen">
-      <h1>⚽ Football Life Simulator</h1>
-      <p class="tagline">Karir. Drama. Warisan.</p>
+      <div class="game-logo">
+        <div class="logo-wordmark">GAME BOLA</div>
+        <div class="logo-sub">FOOTBALL LIFE SIMULATOR</div>
+      </div>
+      <p class="tagline">Karir · Drama · Warisan</p>
 
-      <!-- Save slots -->
       <div class="slot-grid">
         {#each Array.from({ length: MAX_SLOTS }, (_, i) => i) as i}
           {@const meta = allMeta[i]}
-          <div class="slot-card" class:active-slot={activeSlot === i}>
+          <div class="slot-card" class:has-save={!!meta}>
             <div class="slot-header">
-              <span class="slot-label">Slot {i + 1}</span>
-              {#if meta}<button class="slot-delete" onclick={() => deleteAndReset(i)} title="Hapus">✕</button>{/if}
+              <span class="slot-num">SLOT {i + 1}</span>
+              {#if meta}
+                <button class="slot-delete" onclick={() => deleteAndReset(i)} title="Hapus save" aria-label="Hapus slot {i+1}">✕</button>
+              {/if}
             </div>
             {#if meta}
               <p class="slot-name">{meta.playerName}</p>
-              <p class="slot-detail">{meta.clubName} · Musim {meta.season} · {meta.mode ?? "player"}</p>
+              <p class="slot-detail">{meta.clubName}</p>
+              <p class="slot-meta">Musim {meta.season} · {meta.mode ?? "pemain"}</p>
               <p class="slot-date">{new Date(meta.savedAt).toLocaleDateString("id-ID")}</p>
-              <button class="btn-primary slot-continue" onclick={() => continueGame(i)}>▶ Lanjut</button>
+              <button class="btn-continue" onclick={() => continueGame(i)}>▸ Lanjutkan</button>
             {:else}
-              <p class="slot-empty">— Kosong —</p>
-              <div class="slot-newgame">
-                <button onclick={() => openNewGame("player", i)}>🧑 Pemain</button>
-                <button onclick={() => openNewGame("manager", i)}>🎯 Manajer</button>
-                <button onclick={() => openNewGame("agent", i)}>🕵️ Agen</button>
-                <button onclick={() => openNewGame("owner", i)}>👑 Pemilik</button>
+              <p class="slot-empty">Kosong</p>
+              <div class="slot-modes">
+                <button onclick={() => openNewGame("player", i)}>Pemain</button>
+                <button onclick={() => openNewGame("manager", i)}>Manajer</button>
+                <button onclick={() => openNewGame("agent", i)}>Agen</button>
+                <button onclick={() => openNewGame("owner", i)}>Pemilik</button>
               </div>
             {/if}
           </div>
@@ -773,15 +774,13 @@
     <p class="center">Membuat dunia…</p>
 
   {:else if screen === "career" && world}
-    {#if watchedSteps && watchedSteps.length > 0}
+    {#if watchedWeights}
       <MatchWheel
-        steps={watchedSteps}
-        homeName={watchedHomeName}
-        awayName={watchedAwayName}
+        weights={watchedWeights}
         canIntervene={gameMode === "manager"}
         userClubName={clubName}
         onfinish={handleWatchedMatchFinish}
-        onclose={() => (watchedSteps = null)}
+        onclose={() => (watchedWeights = null)}
       />
     {:else}
       {#if activeLegalCase}
@@ -966,22 +965,36 @@
 
 <style>
   :global(:root) {
-    --bg:       #080c11;
-    --surface:  #0f1620;
-    --surface2: #172030;
-    --border:   #1e2d3d;
-    --border2:  #2a3f55;
-    --green:    #22c55e;
-    --green-bg: rgba(34,197,94,0.08);
-    --green-hi: rgba(34,197,94,0.18);
-    --amber:    #f59e0b;
-    --blue:     #60a5fa;
-    --red:      #f87171;
-    --purple:   #a78bfa;
-    --text:     #e2e8f0;
-    --text2:    #8fa3b8;
-    --text3:    #3d5470;
-    --radius:   3px;
+    /* Backgrounds */
+    --bg:        #0d1009;
+    --surface:   #141b11;
+    --surface2:  #1c2618;
+    --surface3:  #243020;
+    /* Borders */
+    --border:    #243020;
+    --border2:   #2e3e28;
+    --border3:   #3a5032;
+    /* Text */
+    --text:      #dde8cc;
+    --text2:     #8aaa72;
+    --text3:     #4a6040;
+    /* Identity accent — gold/trophy */
+    --green:     #d4a843;
+    --green-bg:  rgba(212, 168, 67, 0.10);
+    --green-hi:  rgba(212, 168, 67, 0.20);
+    /* Semantic */
+    --win:       #4caf70;
+    --win-bg:    rgba(76, 175, 112, 0.10);
+    --red:       #e05050;
+    --red-bg:    rgba(224, 80, 80, 0.10);
+    --amber:     #c8962a;
+    --amber-bg:  rgba(200, 150, 42, 0.10);
+    --blue:      #4fa8e0;
+    --blue-bg:   rgba(79, 168, 224, 0.10);
+    --purple:    #9b72d4;
+    /* Misc */
+    --radius:    4px;
+    --font-display: 'Oswald', 'Impact', 'Arial Narrow Bold', sans-serif;
   }
 
   :global(body) {
@@ -993,10 +1006,10 @@
   :global(*) { box-sizing: border-box; }
 
   main {
-    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", ui-monospace, monospace;
-    max-width: 860px;
+    font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", ui-monospace, monospace;
+    max-width: 540px;
     margin: 0 auto;
-    padding: 1.5rem 1rem 4rem;
+    padding: 1rem 1rem 5rem;
     min-height: 100vh;
   }
 
@@ -1008,70 +1021,188 @@
   }
   .error { color: var(--red); }
 
+  /* ── Title Screen ── */
   .title-screen {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1.5rem;
-    margin-top: 6rem;
+    gap: 1.25rem;
+    padding-top: 4rem;
   }
-  .title-screen h1 {
-    font-size: 2.2rem;
-    margin: 0;
-    color: var(--text);
-    letter-spacing: -0.5px;
+
+  .game-logo {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.2rem;
   }
-  .title-screen .tagline {
+  .logo-wordmark {
+    font-family: var(--font-display);
+    font-size: 3.6rem;
+    font-weight: 700;
+    color: var(--green);
+    letter-spacing: 0.04em;
+    line-height: 1;
+    text-transform: uppercase;
+  }
+  .logo-sub {
+    font-size: 0.65rem;
+    letter-spacing: 0.22em;
+    color: var(--text3);
+    text-transform: uppercase;
+  }
+  .tagline {
+    font-size: 0.8rem;
     color: var(--text2);
-    font-size: 0.95rem;
     margin: 0;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.06em;
   }
-  .title-screen button {
-    padding: 0.75rem 2.5rem;
+
+  /* ── Save Slots ── */
+  .slot-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.75rem;
+    width: 100%;
+    margin-top: 0.5rem;
+  }
+  @media (max-width: 500px) {
+    .slot-grid { grid-template-columns: 1fr; }
+  }
+
+  .slot-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    min-height: 155px;
+    transition: border-color 0.15s;
+  }
+  .slot-card.has-save { border-color: var(--border2); }
+  .slot-card.has-save:hover { border-color: var(--border3); }
+
+  .slot-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.2rem;
+  }
+  .slot-num {
+    font-size: 0.62rem;
+    color: var(--text3);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .slot-delete {
+    background: none;
+    border: none;
+    color: var(--text3);
+    cursor: pointer;
+    font-size: 0.75rem;
+    padding: 0.1rem 0.25rem;
+    line-height: 1;
+    border-radius: 2px;
+    transition: color 0.1s;
+  }
+  .slot-delete:hover { color: var(--red); }
+
+  .slot-name {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .slot-detail {
+    font-size: 0.75rem;
+    color: var(--text2);
+    margin: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .slot-meta {
+    font-size: 0.7rem;
+    color: var(--text3);
+    margin: 0;
+  }
+  .slot-date {
+    font-size: 0.65rem;
+    color: var(--text3);
+    margin: 0 0 auto;
+  }
+  .btn-continue {
+    margin-top: 0.5rem;
+    padding: 0.45rem 0.75rem;
     background: var(--green);
-    color: #000;
+    color: #0d1009;
     border: none;
     cursor: pointer;
     font-family: inherit;
-    font-size: 1rem;
-    font-weight: bold;
+    font-size: 0.8rem;
+    font-weight: 700;
     border-radius: var(--radius);
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
+    width: 100%;
     transition: opacity 0.15s;
+    text-align: center;
   }
-  .title-screen button:hover { opacity: 0.88; }
+  .btn-continue:hover { opacity: 0.85; }
+
+  .slot-empty {
+    font-size: 0.72rem;
+    color: var(--text3);
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: 0.04em;
+  }
+  .slot-modes {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.3rem;
+    margin-top: auto;
+  }
+  .slot-modes button {
+    background: none;
+    border: 1px solid var(--border2);
+    border-radius: var(--radius);
+    color: var(--text2);
+    cursor: pointer;
+    padding: 0.35rem 0.4rem;
+    font-family: inherit;
+    font-size: 0.72rem;
+    text-align: center;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .slot-modes button:hover {
+    background: var(--green-bg);
+    color: var(--green);
+    border-color: var(--green);
+  }
+
+  /* ── Shared btn-primary (kept for back-compat) ── */
   .btn-primary {
-    padding: 0.75rem 2.5rem;
+    padding: 0.6rem 1.4rem;
     background: var(--green);
-    color: #000;
+    color: #0d1009;
     border: none;
     cursor: pointer;
     font-family: inherit;
-    font-size: 1rem;
-    font-weight: bold;
+    font-size: 0.88rem;
+    font-weight: 700;
     border-radius: var(--radius);
-    letter-spacing: 0.03em;
+    letter-spacing: 0.04em;
     transition: opacity 0.15s;
   }
-  .btn-primary:hover:not(:disabled) { opacity: 0.88; }
+  .btn-primary:hover:not(:disabled) { opacity: 0.85; }
   .btn-primary:disabled { opacity: 0.35; cursor: default; }
-  /* ── Save slots ── */
-  .slot-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-top: 1.5rem; max-width: 700px; width: 100%; }
-  .slot-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; display: flex; flex-direction: column; gap: 0.4rem; min-height: 160px; }
-  .slot-card.active-slot { border-color: var(--accent); }
-  .slot-header { display: flex; justify-content: space-between; align-items: center; }
-  .slot-label { font-size: 0.75rem; color: var(--text3); font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
-  .slot-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 0.85rem; padding: 0.1rem 0.3rem; }
-  .slot-delete:hover { color: var(--red, #ef4444); }
-  .slot-name { font-size: 1rem; font-weight: 700; color: var(--text); }
-  .slot-detail { font-size: 0.78rem; color: var(--text2); }
-  .slot-date { font-size: 0.72rem; color: var(--text3); }
-  .slot-continue { padding: 0.4rem 0.8rem; font-size: 0.83rem; margin-top: 0.25rem; }
-  .slot-empty { color: var(--text3); font-size: 0.82rem; flex: 1; display: flex; align-items: center; justify-content: center; }
-  .slot-newgame { display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem; margin-top: 0.25rem; }
-  .slot-newgame button { background: none; border: 1px solid var(--border2); border-radius: 5px; color: var(--text2); cursor: pointer; padding: 0.3rem 0.4rem; font-size: 0.76rem; text-align: left; }
-  .slot-newgame button:hover { background: var(--surface2); color: var(--text); }
 
   .save-bar {
     display: flex;

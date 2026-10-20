@@ -1,5 +1,6 @@
 import { getDB } from "./db.js";
-import { fullSim, wheelSim } from "./match.js";
+import { fullSim, calcMatchWeights } from "./match.js";
+import type { MatchWeights } from "./match.js";
 import { recalcPACA } from "./pa.js";
 import { evaluateSeasonAwards } from "./awards.js";
 import { getSeasonChampion, generateMultiStageFixtures } from "./stages.js";
@@ -976,9 +977,7 @@ function updateSquadStats(
 
 export interface MatchDayOutput {
   results: MatchResult[];
-  watchedSteps: MatchStep[] | null;
-  watchedHomeName: string;
-  watchedAwayName: string;
+  watchedWeights: MatchWeights | null;
 }
 
 // Process all unplayed fixtures on `day`. Uses wheelSim for watchClubId's match if provided.
@@ -991,9 +990,7 @@ export function processMatchDay(day: number, egoId = 0, watchClubId = 0, season 
   );
 
   const results: MatchResult[] = [];
-  let watchedSteps: MatchStep[] | null = null;
-  let watchedHomeName = "";
-  let watchedAwayName = "";
+  let watchedWeights: MatchWeights | null = null;
 
   for (const row of fixtures[0]?.values ?? []) {
     const [matchId, leagueId, homeId, awayId, stageId] = row as [number, number, number, number, string];
@@ -1047,11 +1044,9 @@ export function processMatchDay(day: number, egoId = 0, watchClubId = 0, season 
 
     let result: MatchResult;
     if (watchClubId > 0 && (homeId === watchClubId || awayId === watchClubId)) {
-      const w = wheelSim(simInput);
+      const w = calcMatchWeights(simInput);
       result = w.result;
-      watchedSteps = w.steps;
-      watchedHomeName = homeClub.name;
-      watchedAwayName = awayClub.name;
+      watchedWeights = w.weights;
     } else {
       result = fullSim(simInput);
     }
@@ -1099,7 +1094,7 @@ export function processMatchDay(day: number, egoId = 0, watchClubId = 0, season 
 
     results.push(result);
   }
-  return { results, watchedSteps, watchedHomeName, watchedAwayName };
+  return { results, watchedWeights };
 }
 
 export function applyMidMatchScoreUpdate(matchId: number, newHomeGoals: number, newAwayGoals: number): void {
@@ -1210,15 +1205,37 @@ export function rolloverSeason(currentSeason: number, egoId: number): { summary:
   try {
     // 1. Award trophy to league champion squads
     for (const ch of [
-      champ1, champ2, champ3, champ4, champ5, champ6, champ7, champ8, champ9,
-      champ11, champ17, champ18, champ19, champ21,
-      champ12, champ22, champ23,
-      champ13, champ24, champ25,
-      champ14, champ26, champ27,
-      champ28, champ29,
-      champ15, champ32,
-      champ33, champ34,
-      champ35, champ36,
+      champ1,
+      champ2,
+      champ3,
+      champ4,
+      champ5,
+      champ6,
+      champ7,
+      champ8,
+      champ9,
+      champ11,
+      champ17,
+      champ18,
+      champ19,
+      champ21,
+      champ12,
+      champ22,
+      champ23,
+      champ13,
+      champ24,
+      champ25,
+      champ14,
+      champ26,
+      champ27,
+      champ28,
+      champ29,
+      champ15,
+      champ32,
+      champ33,
+      champ34,
+      champ35,
+      champ36,
       champ16,
     ]) {
       if (ch) {
@@ -1313,30 +1330,174 @@ export function rolloverSeason(currentSeason: number, egoId: number): { summary:
     // 4b. Automatic Promotion & Relegation
     const promoRelTiers = [
       // Indonesia (3 clubs)
-      { upperId: 1, lowerId: 2, upperName: "Liga 1", lowerName: "Liga 2", count: 3, cashBonus: 3_000_000_000, repUp: 5, repDown: 4 },
-      { upperId: 2, lowerId: 5, upperName: "Liga 2", lowerName: "Liga 3", count: 3, cashBonus: 1_000_000_000, repUp: 4, repDown: 3 },
+      {
+        upperId: 1,
+        lowerId: 2,
+        upperName: "Liga 1",
+        lowerName: "Liga 2",
+        count: 3,
+        cashBonus: 3_000_000_000,
+        repUp: 5,
+        repDown: 4,
+      },
+      {
+        upperId: 2,
+        lowerId: 5,
+        upperName: "Liga 2",
+        lowerName: "Liga 3",
+        count: 3,
+        cashBonus: 1_000_000_000,
+        repUp: 4,
+        repDown: 3,
+      },
       // England Pyramid (2 clubs per boundary)
-      { upperId: 11, lowerId: 17, upperName: "Premier League", lowerName: "Championship", count: 2, cashBonus: 50_000_000_000, repUp: 5, repDown: 4 },
-      { upperId: 17, lowerId: 18, upperName: "Championship", lowerName: "League One", count: 2, cashBonus: 15_000_000_000, repUp: 4, repDown: 3 },
-      { upperId: 18, lowerId: 19, upperName: "League One", lowerName: "League Two", count: 2, cashBonus: 8_000_000_000, repUp: 3, repDown: 3 },
-      { upperId: 19, lowerId: 21, upperName: "League Two", lowerName: "National League", count: 2, cashBonus: 4_000_000_000, repUp: 3, repDown: 2 },
+      {
+        upperId: 11,
+        lowerId: 17,
+        upperName: "Premier League",
+        lowerName: "Championship",
+        count: 2,
+        cashBonus: 50_000_000_000,
+        repUp: 5,
+        repDown: 4,
+      },
+      {
+        upperId: 17,
+        lowerId: 18,
+        upperName: "Championship",
+        lowerName: "League One",
+        count: 2,
+        cashBonus: 15_000_000_000,
+        repUp: 4,
+        repDown: 3,
+      },
+      {
+        upperId: 18,
+        lowerId: 19,
+        upperName: "League One",
+        lowerName: "League Two",
+        count: 2,
+        cashBonus: 8_000_000_000,
+        repUp: 3,
+        repDown: 3,
+      },
+      {
+        upperId: 19,
+        lowerId: 21,
+        upperName: "League Two",
+        lowerName: "National League",
+        count: 2,
+        cashBonus: 4_000_000_000,
+        repUp: 3,
+        repDown: 2,
+      },
       // Spain (2 clubs)
-      { upperId: 12, lowerId: 22, upperName: "La Liga", lowerName: "Segunda", count: 2, cashBonus: 35_000_000_000, repUp: 4, repDown: 4 },
-      { upperId: 22, lowerId: 23, upperName: "Segunda", lowerName: "Primera Fed", count: 2, cashBonus: 10_000_000_000, repUp: 3, repDown: 3 },
+      {
+        upperId: 12,
+        lowerId: 22,
+        upperName: "La Liga",
+        lowerName: "Segunda",
+        count: 2,
+        cashBonus: 35_000_000_000,
+        repUp: 4,
+        repDown: 4,
+      },
+      {
+        upperId: 22,
+        lowerId: 23,
+        upperName: "Segunda",
+        lowerName: "Primera Fed",
+        count: 2,
+        cashBonus: 10_000_000_000,
+        repUp: 3,
+        repDown: 3,
+      },
       // Italy (2 clubs)
-      { upperId: 13, lowerId: 24, upperName: "Serie A", lowerName: "Serie B", count: 2, cashBonus: 30_000_000_000, repUp: 4, repDown: 4 },
-      { upperId: 24, lowerId: 25, upperName: "Serie B", lowerName: "Serie C", count: 2, cashBonus: 8_000_000_000, repUp: 3, repDown: 3 },
+      {
+        upperId: 13,
+        lowerId: 24,
+        upperName: "Serie A",
+        lowerName: "Serie B",
+        count: 2,
+        cashBonus: 30_000_000_000,
+        repUp: 4,
+        repDown: 4,
+      },
+      {
+        upperId: 24,
+        lowerId: 25,
+        upperName: "Serie B",
+        lowerName: "Serie C",
+        count: 2,
+        cashBonus: 8_000_000_000,
+        repUp: 3,
+        repDown: 3,
+      },
       // Germany (2 clubs)
-      { upperId: 14, lowerId: 26, upperName: "Bundesliga", lowerName: "2. Bundesliga", count: 2, cashBonus: 35_000_000_000, repUp: 4, repDown: 4 },
-      { upperId: 26, lowerId: 27, upperName: "2. Bundesliga", lowerName: "3. Liga", count: 2, cashBonus: 10_000_000_000, repUp: 3, repDown: 3 },
+      {
+        upperId: 14,
+        lowerId: 26,
+        upperName: "Bundesliga",
+        lowerName: "2. Bundesliga",
+        count: 2,
+        cashBonus: 35_000_000_000,
+        repUp: 4,
+        repDown: 4,
+      },
+      {
+        upperId: 26,
+        lowerId: 27,
+        upperName: "2. Bundesliga",
+        lowerName: "3. Liga",
+        count: 2,
+        cashBonus: 10_000_000_000,
+        repUp: 3,
+        repDown: 3,
+      },
       // France (2 clubs)
-      { upperId: 28, lowerId: 29, upperName: "Ligue 1", lowerName: "Ligue 2", count: 2, cashBonus: 25_000_000_000, repUp: 4, repDown: 4 },
+      {
+        upperId: 28,
+        lowerId: 29,
+        upperName: "Ligue 1",
+        lowerName: "Ligue 2",
+        count: 2,
+        cashBonus: 25_000_000_000,
+        repUp: 4,
+        repDown: 4,
+      },
       // Netherlands (2 clubs)
-      { upperId: 15, lowerId: 32, upperName: "Eredivisie", lowerName: "Eerste Divisie", count: 2, cashBonus: 15_000_000_000, repUp: 4, repDown: 3 },
+      {
+        upperId: 15,
+        lowerId: 32,
+        upperName: "Eredivisie",
+        lowerName: "Eerste Divisie",
+        count: 2,
+        cashBonus: 15_000_000_000,
+        repUp: 4,
+        repDown: 3,
+      },
       // Portugal (2 clubs)
-      { upperId: 33, lowerId: 34, upperName: "Primeira Liga", lowerName: "Liga Portugal 2", count: 2, cashBonus: 18_000_000_000, repUp: 4, repDown: 3 },
+      {
+        upperId: 33,
+        lowerId: 34,
+        upperName: "Primeira Liga",
+        lowerName: "Liga Portugal 2",
+        count: 2,
+        cashBonus: 18_000_000_000,
+        repUp: 4,
+        repDown: 3,
+      },
       // Turkey (2 clubs)
-      { upperId: 35, lowerId: 36, upperName: "Süper Lig", lowerName: "TFF 1. Lig", count: 2, cashBonus: 18_000_000_000, repUp: 4, repDown: 3 },
+      {
+        upperId: 35,
+        lowerId: 36,
+        upperName: "Süper Lig",
+        lowerName: "TFF 1. Lig",
+        count: 2,
+        cashBonus: 18_000_000_000,
+        repUp: 4,
+        repDown: 3,
+      },
     ];
 
     const promoRelParts: string[] = [];
@@ -1355,10 +1516,12 @@ export function rolloverSeason(currentSeason: number, egoId: number): { summary:
           db.run(`UPDATE league_slots SET league_id = ? WHERE club_id = ?`, [tier.lowerId, r.club_id]);
         }
         for (const p of promoted) {
-          db.run(
-            `UPDATE clubs SET league_id = ?, reputation = MIN(95, reputation + ?), cash = cash + ? WHERE id = ?`,
-            [tier.upperId, tier.repUp, tier.cashBonus, p.club_id],
-          );
+          db.run(`UPDATE clubs SET league_id = ?, reputation = MIN(95, reputation + ?), cash = cash + ? WHERE id = ?`, [
+            tier.upperId,
+            tier.repUp,
+            tier.cashBonus,
+            p.club_id,
+          ]);
           db.run(`UPDATE league_slots SET league_id = ? WHERE club_id = ?`, [tier.upperId, p.club_id]);
         }
         promoRelParts.push(

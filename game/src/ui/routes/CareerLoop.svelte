@@ -184,7 +184,7 @@
       <h2>{egoPlayer?.name ?? playerName}</h2>
       <span class="badge">{egoPlayer?.position ?? playerPosition}</span>
       {#if egoPlayer}
-        <span class="ovr">OVR {egoPlayer.overall} <small>(PA {egoPlayer.pa})</small></span>
+        <span class="ovr"><strong>OVR {egoPlayer.overall}</strong> · PA {egoPlayer.pa}</span>
       {/if}
     </div>
     <p class="sub">
@@ -724,44 +724,56 @@
   /* ── Header ── */
   header {
     border-bottom: 1px solid var(--border);
-    padding-bottom: 1rem;
+    padding-bottom: 0.85rem;
   }
   .title-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-  h2 { margin: 0; font-size: 1.35rem; color: var(--text); letter-spacing: -0.3px; }
+  h2 {
+    margin: 0;
+    font-family: var(--font-display, 'Impact', sans-serif);
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    line-height: 1;
+  }
   .badge {
     background: var(--green);
-    color: #000;
-    padding: 0.15rem 0.5rem;
-    font-size: 0.7rem;
-    font-weight: bold;
+    color: #0d1009;
+    padding: 0.18rem 0.55rem;
+    font-size: 0.68rem;
+    font-weight: 700;
     border-radius: 2px;
+    letter-spacing: 0.06em;
   }
-  .ovr { color: var(--green); font-weight: bold; font-size: 0.85rem; }
-  .ovr small { color: var(--text3); font-weight: normal; }
-  .sub { margin: 0.3rem 0 0; color: var(--text2); font-size: 0.82rem; }
-  .traits-row { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
+  .ovr { color: var(--text2); font-size: 0.82rem; }
+  .ovr strong { color: var(--green); }
+  .sub { margin: 0.3rem 0 0; color: var(--text2); font-size: 0.78rem; line-height: 1.5; }
+  .traits-row { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.5rem; }
   .trait-tag {
     background: var(--surface2);
     border: 1px solid var(--border2);
-    color: var(--text2);
-    font-size: 0.7rem;
-    padding: 0.1rem 0.5rem;
+    color: var(--text3);
+    font-size: 0.65rem;
+    padding: 0.1rem 0.45rem;
     border-radius: 2px;
+    letter-spacing: 0.04em;
   }
 
   /* ── Alerts ── */
   .status-alerts { display: flex; flex-direction: column; gap: 0.4rem; }
   .alert {
-    padding: 0.55rem 0.85rem;
-    font-size: 0.83rem;
-    border-left: 3px solid var(--red);
-    background: rgba(248,113,113,0.07);
+    padding: 0.5rem 0.8rem;
+    font-size: 0.8rem;
+    border-left: 2px solid var(--red);
+    background: var(--red-bg);
     color: var(--red);
     border-radius: 0 var(--radius) var(--radius) 0;
+    line-height: 1.45;
   }
   .alert.injury {
     border-left-color: var(--amber);
-    background: rgba(245,158,11,0.07);
+    background: var(--amber-bg);
     color: var(--amber);
   }
   .alert.event-outcome {
@@ -773,23 +785,25 @@
   /* ── Stats row ── */
   .stats-row {
     display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
+    gap: 0;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 0.75rem 1rem;
+    overflow: hidden;
   }
   .stat {
     display: flex;
     flex-direction: column;
     align-items: center;
     flex: 1;
-    min-width: 48px;
+    min-width: 44px;
+    padding: 0.6rem 0.25rem;
+    border-right: 1px solid var(--border);
   }
-  .label { font-size: 0.68rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.04em; }
-  .val { font-size: 1.2rem; font-weight: bold; color: var(--text); margin-top: 0.15rem; }
-  .cards-val { font-size: 0.95rem; line-height: 1.6rem; }
+  .stat:last-child { border-right: none; }
+  .label { font-size: 0.6rem; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; }
+  .val { font-size: 1.1rem; font-weight: 700; color: var(--text); margin-top: 0.1rem; line-height: 1; }
+  .cards-val { font-size: 0.88rem; line-height: 1.4; }
 
   /* ── Profile panels ── */
   .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }

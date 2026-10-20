@@ -21,73 +21,55 @@ function playerZoneScore(p: Player): number {
       return (
         p.finishing * 0.35 +
         p.heading * 0.15 +
-        p.strength * 0.10 +
+        p.strength * 0.1 +
         p.composure * 0.15 +
         p.off_the_ball * 0.15 +
-        p.technique * 0.10
+        p.technique * 0.1
       );
     case "LW":
     case "RW":
-      return (
-        p.dribbling * 0.30 +
-        p.pace * 0.25 +
-        p.crossing * 0.20 +
-        p.technique * 0.15 +
-        p.agility * 0.10
-      );
+      return p.dribbling * 0.3 + p.pace * 0.25 + p.crossing * 0.2 + p.technique * 0.15 + p.agility * 0.1;
     case "AM":
-      return (
-        p.passing * 0.25 +
-        p.vision * 0.25 +
-        p.finishing * 0.20 +
-        p.anticipation * 0.15 +
-        p.decisions * 0.15
-      );
+      return p.passing * 0.25 + p.vision * 0.25 + p.finishing * 0.2 + p.anticipation * 0.15 + p.decisions * 0.15;
     case "CM":
       return (
         p.passing * 0.25 +
-        p.vision * 0.20 +
-        p.decisions * 0.20 +
+        p.vision * 0.2 +
+        p.decisions * 0.2 +
         p.work_rate * 0.15 +
-        p.technique * 0.10 +
-        p.positioning * 0.10
+        p.technique * 0.1 +
+        p.positioning * 0.1
       );
     case "DM":
       return (
         p.positioning * 0.25 +
-        p.decisions * 0.20 +
-        p.tackling * 0.20 +
+        p.decisions * 0.2 +
+        p.tackling * 0.2 +
         p.work_rate * 0.15 +
-        p.strength * 0.10 +
-        p.anticipation * 0.10
+        p.strength * 0.1 +
+        p.anticipation * 0.1
       );
     case "CB":
       return (
         p.positioning * 0.25 +
-        p.heading * 0.20 +
-        p.tackling * 0.20 +
+        p.heading * 0.2 +
+        p.tackling * 0.2 +
         p.strength * 0.15 +
-        p.anticipation * 0.10 +
-        p.decisions * 0.10
+        p.anticipation * 0.1 +
+        p.decisions * 0.1
       );
     case "LB":
     case "RB":
       return (
-        p.positioning * 0.20 +
-        p.pace * 0.20 +
+        p.positioning * 0.2 +
+        p.pace * 0.2 +
         p.tackling * 0.15 +
         p.crossing * 0.15 +
         p.work_rate * 0.15 +
         p.strength * 0.15
       );
     case "GK":
-      return (
-        p.reflexes * 0.35 +
-        p.handling * 0.25 +
-        p.gk_positioning * 0.20 +
-        p.one_on_ones * 0.15 +
-        p.command * 0.05
-      );
+      return p.reflexes * 0.35 + p.handling * 0.25 + p.gk_positioning * 0.2 + p.one_on_ones * 0.15 + p.command * 0.05;
   }
 }
 
@@ -103,8 +85,7 @@ function zoneRating(players: Player[], zone: "attack" | "mid" | "defense"): numb
   const gk = zp.find((p) => p.position === "GK");
   const outfield = zp.filter((p) => p.position !== "GK");
   const gkRating = gk ? playerZoneScore(gk) : 0;
-  const defRating =
-    outfield.length > 0 ? outfield.reduce((s, p) => s + playerZoneScore(p), 0) / outfield.length : 0;
+  const defRating = outfield.length > 0 ? outfield.reduce((s, p) => s + playerZoneScore(p), 0) / outfield.length : 0;
   return gk ? (gkRating + defRating) / 2 : defRating;
 }
 
@@ -169,7 +150,7 @@ const GOAL_POSITION_WEIGHT: Record<string, number> = {
 
 function attributeGoal(players: Player[], minute: number, clubId: number): GoalEvent {
   const weights = players.map((p) => {
-    const composureMod = 0.80 + p.composure / 500;
+    const composureMod = 0.8 + p.composure / 500;
     return p.finishing * (GOAL_POSITION_WEIGHT[p.position] ?? 0.1) * p.form * composureMod;
   });
   const total = weights.reduce((s, w) => s + w, 0);
@@ -219,7 +200,7 @@ export interface SimInput {
 const BASE_XG_BY_LEVEL: Record<number, number> = { 1: 1.2, 2: 1.1, 3: 1.0, 4: 0.95 };
 
 function mentalityModifiers(m: TacticalMentality = "balanced"): { att: number; def: number } {
-  if (m === "attacking") return { att: 1.14, def: 0.90 };
+  if (m === "attacking") return { att: 1.14, def: 0.9 };
   if (m === "defensive") return { att: 0.88, def: 1.14 };
   return { att: 1.0, def: 1.0 };
 }
@@ -317,12 +298,19 @@ export interface WheelSlice {
   color: string;
 }
 
-export interface MatchStep {
+export type MatchZone = "center" | "approach" | "box" | "goal" | "defense";
+
+// ProtoStep: weights only, no outcome — rolled live in frontend
+export interface ProtoStep {
   minute: number;
   attacking_club_id: number;
   attacking_club_name: string;
   team_slices: [WheelSlice, WheelSlice]; // [home, away]
-  event_slices: WheelSlice[];
+  event_slices: WheelSlice[]; // probability weights
+}
+
+// MatchStep: resolved — rolled live by frontend
+export interface MatchStep extends ProtoStep {
   chosen_index: number;
   outcome_key: string;
   outcome_label: string;
@@ -330,6 +318,7 @@ export interface MatchStep {
   home_goals: number;
   away_goals: number;
   commentary: string;
+  zone: MatchZone;
 }
 
 function pickRandom<T>(arr: T[]): T {
@@ -472,7 +461,7 @@ export function commentary(
 function sampleAttackMinute(): number {
   const r = Math.random();
   if (r < 0.25) return 30 + Math.floor(Math.random() * 16); // 30–45
-  if (r < 0.50) return 75 + Math.floor(Math.random() * 16); // 75–90
+  if (r < 0.5) return 75 + Math.floor(Math.random() * 16); // 75–90
   return 1 + Math.floor(Math.random() * 90);
 }
 
@@ -563,10 +552,7 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
     const nonGoalTotal = nonGoalSlices.reduce((s, x) => s + x.raw, 0);
     const goalConversionTarget = Math.min(0.45, Math.max(0.02, teamXG / expectedTeamAttacks));
     const goalRaw = (goalConversionTarget * nonGoalTotal) / (1 - goalConversionTarget);
-    const rawSlices = [
-      { key: "GOAL", label: "⚽ GOL", raw: goalRaw, color: "#2c7" },
-      ...nonGoalSlices,
-    ];
+    const rawSlices = [{ key: "GOAL", label: "⚽ GOL", raw: goalRaw, color: "#2c7" }, ...nonGoalSlices];
 
     const rawTotal = rawSlices.reduce((s, x) => s + x.raw, 0);
     const eventSlices: WheelSlice[] = rawSlices.map((s) => ({
@@ -696,6 +682,26 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
       }
     }
 
+    const zone: MatchZone = (() => {
+      switch (chosen.key) {
+        case "GOAL":
+        case "PENALTY":
+          return isGoal ? "goal" : "box";
+        case "SAVE":
+        case "WOODWORK":
+          return "box";
+        case "CORNER":
+        case "FREEKICK":
+        case "OUT":
+          return "approach";
+        case "COUNTER":
+        case "DEFENSE":
+          return "defense";
+        default:
+          return "center"; // FOUL, quiet, tackle
+      }
+    })();
+
     steps.push({
       minute,
       attacking_club_id: attClub.id,
@@ -709,6 +715,7 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
       home_goals: homeGoals,
       away_goals: awayGoals,
       commentary: stepCommentary,
+      zone,
     });
   }
 
@@ -728,3 +735,116 @@ export function wheelSim(input: SimInput): { result: MatchResult; steps: MatchSt
   };
 }
 
+// ─── Match Weights for Live Wheel (§2 GAME-ENGINE.md) ────────────────────────
+// Returns static probability weights for the frontend to roll live,
+// plus a pre-computed result (from fullSim) for DB persistence.
+// The frontend rolls outcomes fresh per wheel — nothing is predestined.
+
+export interface MatchWeights {
+  teamSlices: [WheelSlice, WheelSlice]; // [home, away] — Team Wheel
+  eventSlicesHome: WheelSlice[]; // Event Wheel when home attacks
+  eventSlicesAway: WheelSlice[]; // Event Wheel when away attacks
+  cardSlices: WheelSlice[]; // Card Wheel — shown after FOUL
+  penaltySlices: WheelSlice[]; // Penalty Wheel — shown after PENALTY
+  minutes: number[]; // pre-set attack timing (not outcomes)
+  homeId: number;
+  awayId: number;
+  homeName: string;
+  awayName: string;
+  homeXG: number;
+  awayXG: number;
+}
+
+function buildEventSlices(
+  attRating: number,
+  defRating: number,
+  teamXG: number,
+  totalAttacks: number,
+  teamShare: number,
+): WheelSlice[] {
+  const expectedTeamAttacks = Math.max(4, totalAttacks * teamShare);
+  const nonGoal = [
+    { key: "SAVE", label: "🧤 Tepis Kiper", raw: 6 * (attRating / 10), color: "#39d" },
+    { key: "DEFENSE", label: "🛡 Sapuan Bek", raw: 10 * (defRating / 10), color: "#567" },
+    { key: "OUT", label: "💨 Melenceng", raw: 8, color: "#666" },
+    { key: "CORNER", label: "🚩 Sepak Pojok", raw: 6, color: "#a83" },
+    { key: "COUNTER", label: "⚡ Serangan Balik", raw: 5, color: "#85c" },
+    { key: "FOUL", label: "🟨 Pelanggaran", raw: 5, color: "#c92" },
+    { key: "FREEKICK", label: "🎯 Tendangan Bebas", raw: 4, color: "#4a9" },
+    { key: "WOODWORK", label: "🥅 Tiang Gawang", raw: 2, color: "#d64" },
+    { key: "PENALTY", label: "🚨 Penalti", raw: 1, color: "#e34" },
+  ];
+  const nonGoalTotal = nonGoal.reduce((s, x) => s + x.raw, 0);
+  const convTarget = Math.min(0.45, Math.max(0.02, teamXG / expectedTeamAttacks));
+  const goalRaw = (convTarget * nonGoalTotal) / (1 - convTarget);
+  const rawSlices = [{ key: "GOAL", label: "⚽ GOL", raw: goalRaw, color: "#2c7" }, ...nonGoal];
+  const rawTotal = rawSlices.reduce((s, x) => s + x.raw, 0);
+  return rawSlices.map((s) => ({
+    key: s.key,
+    label: s.label,
+    color: s.color,
+    weight: Math.max(1, Math.round((s.raw / rawTotal) * 100)),
+  }));
+}
+
+export function calcMatchWeights(input: SimInput): { weights: MatchWeights; result: MatchResult } {
+  const { home_club, away_club, home_players, away_players, league_level, date, league_id, match_id } = input;
+  const baseXG = BASE_XG_BY_LEVEL[league_level] ?? 0.9;
+  const hMod = mentalityModifiers(input.home_mentality);
+  const aMod = mentalityModifiers(input.away_mentality);
+  const hStaff = input.home_staff_bonus ?? 1.0;
+  const aStaff = input.away_staff_bonus ?? 1.0;
+
+  const homeAttack = zoneRating(home_players, "attack") * hMod.att * hStaff;
+  const homeMid = zoneRating(home_players, "mid") * hStaff;
+  const homeDefense = zoneRating(home_players, "defense") * hMod.def * hStaff;
+  const awayAttack = zoneRating(away_players, "attack") * aMod.att * aStaff;
+  const awayMid = zoneRating(away_players, "mid") * aStaff;
+  const awayDefense = zoneRating(away_players, "defense") * aMod.def * aStaff;
+
+  const midAdvHome = homeMid / Math.max(homeMid + awayMid, 1);
+  const formHome = 0.85 + mean(home_players, "form") * 0.3;
+  const formAway = 0.85 + mean(away_players, "form") * 0.3;
+  const moraleHome = 0.9 + (home_club.club_morale / 100) * 0.2;
+  const moraleAway = 0.9 + (away_club.club_morale / 100) * 0.2;
+  const stamHome = 0.8 + mean(home_players, "stamina") * 0.25;
+  const stamAway = 0.8 + mean(away_players, "stamina") * 0.25;
+
+  const xgHome = calcXG(homeAttack, awayDefense, midAdvHome, formHome, moraleHome, stamHome, 1.15, baseXG);
+  const xgAway = calcXG(awayAttack, homeDefense, 1 - midAdvHome, formAway, moraleAway, stamAway, 1.0, baseXG);
+  const homeShare = xgHome / Math.max(xgHome + xgAway, 0.1);
+  const homePct = Math.round(homeShare * 100);
+
+  const totalAttacks = Math.max(14, Math.min(32, poisson(22)));
+  const minutes = Array.from({ length: totalAttacks }, sampleAttackMinute).sort((a, b) => a - b);
+
+  const weights: MatchWeights = {
+    teamSlices: [
+      { key: "HOME", label: home_club.name, weight: homePct, color: "#2a6" },
+      { key: "AWAY", label: away_club.name, weight: 100 - homePct, color: "#38c" },
+    ],
+    eventSlicesHome: buildEventSlices(homeAttack, awayDefense, xgHome, totalAttacks, homeShare),
+    eventSlicesAway: buildEventSlices(awayAttack, homeDefense, xgAway, totalAttacks, 1 - homeShare),
+    cardSlices: [
+      { key: "NONE", label: "⬜ Tidak Ada Kartu", weight: 60, color: "#555" },
+      { key: "YELLOW", label: "🟨 Kartu Kuning", weight: 32, color: "#c92" },
+      { key: "SECOND_YELLOW", label: "🟨🟥 Kartu Merah (2K)", weight: 5, color: "#d64" },
+      { key: "RED", label: "🟥 Kartu Merah", weight: 3, color: "#e34" },
+    ],
+    penaltySlices: [
+      { key: "GOAL", label: "⚽ GOL! Penalti Masuk", weight: 78, color: "#2c7" },
+      { key: "MISS", label: "❌ Penalti Gagal", weight: 22, color: "#e34" },
+    ],
+    minutes,
+    homeId: home_club.id,
+    awayId: away_club.id,
+    homeName: home_club.name,
+    awayName: away_club.name,
+    homeXG: Math.round(xgHome * 100) / 100,
+    awayXG: Math.round(xgAway * 100) / 100,
+  };
+
+  // Pre-compute result with fullSim for DB persistence (not shown to user)
+  const result = fullSim({ ...input });
+  return { weights, result };
+}
